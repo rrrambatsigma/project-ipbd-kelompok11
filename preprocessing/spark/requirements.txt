@@ -1,0 +1,12 @@
+# Spark
+pyspark==3.5.1
+
+# MinIO / S3
+boto3==1.34.69
+
+# Utilities
+python-dotenv==1.0.1
+loguru==0.7.2
+requests==2.32.3
+tenacity==8.3.0
+python-dateutil==2.9.0

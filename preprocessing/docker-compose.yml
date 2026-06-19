@@ -1,0 +1,40 @@
+version: "3.9"
+
+services:
+  # ─────────────────────────────────────────
+  # SPARK — PySpark job runner
+  # ─────────────────────────────────────────
+  spark:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: preprocessing-spark
+    environment:
+      # MinIO (sama dengan ingestion)
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_RAW: news-raw
+      MINIO_BUCKET_PROCESSED: news-processed
+      # Telegram
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      # Spark tuning
+      SPARK_DRIVER_MEMORY: 2g
+      SPARK_EXECUTOR_MEMORY: 2g
+    volumes:
+      - ./spark/jobs:/app/jobs # mount job scripts
+      - spark-logs:/app/logs
+    networks:
+      - preprocessing-net
+    command: >
+      sh -c "tail -f /dev/null"
+
+volumes:
+  spark-logs:
+
+networks:
+  preprocessing-net:
+    driver: bridge
+    # Hubungkan ke network ingestion supaya bisa akses MinIO
+    external: false

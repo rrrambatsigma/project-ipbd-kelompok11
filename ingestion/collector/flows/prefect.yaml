@@ -1,0 +1,114 @@
+name: euro-news-ingestion
+prefect-version: "2.*"
+
+build: null
+push: null
+
+pull:
+  - prefect.deployments.steps.set_working_directory:
+      directory: /app/flows
+
+# ─────────────────────────────────────────────────────────
+# KONVERSI JADWAL: WIB (UTC+7) → UTC
+#
+#  06:00 WIB → 23:00 UTC (hari SEBELUMNYA)  ← pre_market
+#              cron: "0 23 * * 0-4"  (Minggu-Kamis UTC = Senin-Jumat WIB)
+#
+#  09:00 WIB → 02:00 UTC  ← open
+#              cron: "0 2 * * 1-5"
+#
+#  13:00 WIB → 06:00 UTC  ← mid
+#              cron: "0 6 * * 1-5"
+#
+#  17:00 WIB → 10:00 UTC  ← pre_close
+#              cron: "0 10 * * 1-5"
+#
+#  21:00 WIB → 14:00 UTC  ← overlap
+#              cron: "0 14 * * 1-5"
+# ─────────────────────────────────────────────────────────
+
+deployments:
+  # ── Pre-Market: 06:00 WIB = 23:00 UTC hari sebelumnya ──
+  - name: euro-news-pre-market
+    entrypoint: news_ingestion_flow.py:euro_news_batch_flow
+    work_pool:
+      name: ingestion-pool
+    schedules:
+      - cron: "0 23 * * 0-4"   # Minggu–Kamis UTC = Senin–Jumat WIB
+        timezone: "UTC"
+        active: true
+    parameters:
+      session: pre_market
+      lookback_hours: -1
+      run_ecb: true
+      run_gdelt: true
+      run_newsapi: true
+    tags: [news-ingestion, pre_market, euro-market]
+
+  # ── Open: 09:00 WIB = 02:00 UTC ──
+  - name: euro-news-open
+    entrypoint: news_ingestion_flow.py:euro_news_batch_flow
+    work_pool:
+      name: ingestion-pool
+    schedules:
+      - cron: "0 2 * * 1-5"
+        timezone: "UTC"
+        active: true
+    parameters:
+      session: open
+      lookback_hours: -1
+      run_ecb: true
+      run_gdelt: true
+      run_newsapi: true
+    tags: [news-ingestion, open, euro-market]
+
+  # ── Mid: 13:00 WIB = 06:00 UTC ──
+  - name: euro-news-mid
+    entrypoint: news_ingestion_flow.py:euro_news_batch_flow
+    work_pool:
+      name: ingestion-pool
+    schedules:
+      - cron: "0 6 * * 1-5"
+        timezone: "UTC"
+        active: true
+    parameters:
+      session: mid
+      lookback_hours: -1
+      run_ecb: true
+      run_gdelt: true
+      run_newsapi: true
+    tags: [news-ingestion, mid, euro-market]
+
+  # ── Pre-Close: 17:00 WIB = 10:00 UTC ──
+  - name: euro-news-pre-close
+    entrypoint: news_ingestion_flow.py:euro_news_batch_flow
+    work_pool:
+      name: ingestion-pool
+    schedules:
+      - cron: "0 10 * * 1-5"
+        timezone: "UTC"
+        active: true
+    parameters:
+      session: pre_close
+      lookback_hours: -1
+      run_ecb: true
+      run_gdelt: true
+      run_newsapi: true
+    tags: [news-ingestion, pre_close, euro-market]
+
+  # ── Overlap: 21:00 WIB = 14:00 UTC ──
+  - name: euro-news-overlap
+    entrypoint: news_ingestion_flow.py:euro_news_batch_flow
+    work_pool:
+      name: ingestion-pool
+    schedules:
+      - cron: "0 14 * * 1-5"
+        timezone: "UTC"
+        active: true
+    parameters:
+      session: overlap
+      lookback_hours: -1
+      run_ecb: true
+      run_gdelt: true
+      run_newsapi: true
+    tags: [news-ingestion, overlap, euro-market]
