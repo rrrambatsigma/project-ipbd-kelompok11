@@ -5,11 +5,12 @@ Apache Spark Preprocessing Job — Euro News Pipeline
 Kelompok 11 IPBD
 
 Alur:
-  1. EXTRACT  — baca raw JSON dari MinIO (semua source)
-  2. CLEAN    — hapus duplikat, null, HTML, karakter aneh
-  3. NORMALIZE— standarisasi tanggal, teks, kolom
-  4. AGGREGATE— gabungkan semua source jadi 1 dataset
-  5. LOAD     — simpan ke MinIO sebagai Parquet
+  1. EXTRACT     — baca raw JSON dari MinIO (semua source), paksa RAW_SCHEMA
+  2. CLEAN       — hapus duplikat, null, HTML, karakter aneh
+  3. LANG_FILTER — deteksi bahasa (fastText) dari raw_text, keep hanya English
+  4. NORMALIZE   — standarisasi tanggal, teks, kolom
+  5. AGGREGATE   — gabungkan semua source jadi 1 dataset, dedup lintas-source
+  6. LOAD        — simpan ke MinIO sebagai Parquet
 
 Input  : s3a://news-raw/{source}/{year}/{date}/*.json
 Output : s3a://news-processed/articles/year={YYYY}/month={MM}/
@@ -18,7 +19,6 @@ Output : s3a://news-processed/articles/year={YYYY}/month={MM}/
 
 import os
 import sys
-import hashlib
 import requests
 from datetime import datetime, timezone
 
@@ -27,23 +27,23 @@ from loguru import logger
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
-from pyspark.sql.types import TimestampType
 
 load_dotenv()
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from minio_utils import create_spark_session, ensure_bucket, list_source_paths
+from lang_filter import filter_english
 from schema import RAW_SCHEMA
 
 # ── Konfigurasi ───────────────────────────────────────────
-BUCKET_RAW       = os.getenv("MINIO_BUCKET_RAW",       "news-raw")
+BUCKET_RAW = os.getenv("MINIO_BUCKET_RAW", "news-raw")
 BUCKET_PROCESSED = os.getenv("MINIO_BUCKET_PROCESSED", "news-processed")
-OUTPUT_PATH      = f"s3a://{BUCKET_PROCESSED}/articles"
+OUTPUT_PATH = f"s3a://{BUCKET_PROCESSED}/articles"
 
 SOURCES = ["ecb", "guardian", "gdelt", "newsapi"]
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
 
 # ═══════════════════════════════════════════
@@ -58,8 +58,8 @@ def send_telegram(message: str) -> None:
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
             json={
-                "chat_id":    TELEGRAM_CHAT_ID,
-                "text":       message,
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
                 "parse_mode": "HTML",
                 "disable_web_page_preview": True,
             },
@@ -76,7 +76,10 @@ def send_telegram(message: str) -> None:
 def extract(spark: SparkSession, source: str) -> DataFrame | None:
     """
     Baca semua raw JSON dari MinIO untuk satu source.
-    Return DataFrame atau None jika tidak ada data.
+    Dipaksa pakai RAW_SCHEMA supaya kolom konsisten antar source
+    (mis. kolom `tone` cuma ada di GDELT, `author` cuma di NewsAPI —
+    dengan schema eksplisit, kolom yang gak ada otomatis jadi null,
+    bukan bikin job gagal/skewed).
     """
     paths = list_source_paths(BUCKET_RAW, source)
 
@@ -86,16 +89,15 @@ def extract(spark: SparkSession, source: str) -> DataFrame | None:
 
     logger.info(f"[EXTRACT] {source} — membaca {len(paths)} file...")
 
-    # Baca semua JSON sekaligus (Spark handle parallelism otomatis)
     df = (
         spark.read
         .option("multiLine", "true")
-        .option("mode", "PERMISSIVE")   # skip baris error, tidak stop
+        .option("mode", "PERMISSIVE")
+        .schema(RAW_SCHEMA)
         .json(paths)
     )
 
-    # Tambah kolom source jika tidak ada
-    if "source" not in df.columns:
+    if "source" not in df.columns or df.filter(F.col("source").isNull()).count() == df.count():
         df = df.withColumn("source", F.lit(source))
 
     count = df.count()
@@ -114,46 +116,40 @@ def clean(df: DataFrame, source: str) -> DataFrame:
     - Hapus duplikat berdasarkan URL
     - Bersihkan HTML tags dari raw_text
     - Trim whitespace
-    - Filter hanya bahasa Inggris
+    - Filter minimum panjang teks
     """
     logger.info(f"[CLEAN] {source} — mulai cleaning...")
     before = df.count()
 
-    # 1. Hapus null di kolom wajib
     df = df.filter(
         F.col("title").isNotNull() &
         F.col("url").isNotNull() &
         F.col("published_at").isNotNull()
     )
 
-    # 2. Hapus title/url yang kosong (string kosong)
     df = df.filter(
         (F.length(F.trim(F.col("title"))) > 0) &
         (F.length(F.trim(F.col("url"))) > 0)
     )
 
-    # 3. Hapus duplikat berdasarkan URL (keep pertama)
     df = df.dropDuplicates(["url"])
 
-    # 4. Bersihkan HTML tags dari raw_text menggunakan regex
     df = df.withColumn(
         "raw_text",
-        F.regexp_replace(F.col("raw_text"), "<[^>]+>", " ")  # hapus HTML tags
+        F.regexp_replace(F.col("raw_text"), "<[^>]+>", " ")
     )
     df = df.withColumn(
         "raw_text",
-        F.regexp_replace(F.col("raw_text"), r"\s+", " ")     # normalize whitespace
+        F.regexp_replace(F.col("raw_text"), r"\s+", " ")
     )
     df = df.withColumn(
         "raw_text",
-        F.regexp_replace(F.col("raw_text"), r"[^\x20-\x7E\u00C0-\u024F]", "")  # hapus karakter aneh
+        F.regexp_replace(F.col("raw_text"), r"[^\x20-\x7E\u00C0-\u024F]", "")
     )
 
-    # 5. Trim semua kolom string
-    df = df.withColumn("title",    F.trim(F.col("title")))
+    df = df.withColumn("title", F.trim(F.col("title")))
     df = df.withColumn("raw_text", F.trim(F.col("raw_text")))
 
-    # 6. Filter minimum panjang teks (hindari artikel kosong)
     df = df.filter(F.length(F.col("raw_text")) >= 20)
 
     after = df.count()
@@ -175,12 +171,11 @@ def normalize(df: DataFrame, source: str) -> DataFrame:
     - Ekstrak year, month, day
     - Generate article_id (MD5 hash dari URL)
     - Standardisasi nama kolom
-    - Isi nilai null dengan default
+    - Isi nilai null dengan default (language pakai hasil deteksi fastText,
+      BUKAN diasumsikan "en" begitu saja)
     """
     logger.info(f"[NORMALIZE] {source} — mulai normalisasi...")
 
-    # 1. Parse published_at → Timestamp
-    #    Coba berbagai format tanggal yang mungkin ada
     df = df.withColumn(
         "published_at_ts",
         F.coalesce(
@@ -192,27 +187,19 @@ def normalize(df: DataFrame, source: str) -> DataFrame:
         )
     )
 
-    # Drop baris yang tanggalnya tidak bisa di-parse
     df = df.filter(F.col("published_at_ts").isNotNull())
 
-    # 2. Ekstrak year, month, day dari timestamp
     df = (
         df
-        .withColumn("year",  F.year(F.col("published_at_ts")))
+        .withColumn("year", F.year(F.col("published_at_ts")))
         .withColumn("month", F.month(F.col("published_at_ts")))
-        .withColumn("day",   F.dayofmonth(F.col("published_at_ts")))
+        .withColumn("day", F.dayofmonth(F.col("published_at_ts")))
     )
 
-    # Filter hanya tahun 2021–2026
     df = df.filter(F.col("year").between(2021, 2026))
 
-    # 3. Generate article_id dari MD5 hash URL
-    df = df.withColumn(
-        "article_id",
-        F.md5(F.col("url"))
-    )
+    df = df.withColumn("article_id", F.md5(F.col("url")))
 
-    # 4. Parse ingested_at
     df = df.withColumn(
         "ingested_at_ts",
         F.coalesce(
@@ -222,18 +209,18 @@ def normalize(df: DataFrame, source: str) -> DataFrame:
         )
     )
 
-    # 5. Isi null dengan default
     df = (
         df
-        .withColumn("language",    F.coalesce(F.col("language"),    F.lit("en")))
+        # language: prioritaskan hasil deteksi fastText (akurat),
+        # fallback ke field mentah, fallback terakhir baru "en"
+        .withColumn("language", F.coalesce(F.col("detected_language"), F.col("language"), F.lit("en")))
         .withColumn("source_tier", F.coalesce(F.col("source_tier"), F.lit(0)))
-        .withColumn("category",    F.coalesce(F.col("category"),    F.lit("general")))
-        .withColumn("provider",    F.coalesce(F.col("provider"),    F.lit("")))
-        .withColumn("tone",        F.coalesce(F.col("tone"),        F.lit(None).cast("float")))
-        .withColumn("is_backfill", F.coalesce(F.col("_backfill"),   F.lit(False)))
+        .withColumn("category", F.coalesce(F.col("category"), F.lit("general")))
+        .withColumn("provider", F.coalesce(F.col("provider"), F.lit("")))
+        .withColumn("tone", F.coalesce(F.col("tone"), F.lit(None).cast("float")))
+        .withColumn("is_backfill", F.coalesce(F.col("_backfill"), F.lit(False)))
     )
 
-    # 6. Pilih & rename kolom final
     df = df.select(
         F.col("article_id"),
         F.col("title"),
@@ -269,27 +256,22 @@ def aggregate(dfs: list[DataFrame]) -> DataFrame:
     """
     logger.info(f"[AGGREGATE] Menggabungkan {len(dfs)} source...")
 
-    # Union semua DataFrame
     combined = dfs[0]
     for df in dfs[1:]:
         combined = combined.unionByName(df, allowMissingColumns=True)
 
     before = combined.count()
-
-    # Hapus duplikat lintas source (artikel yang sama dari sumber berbeda)
     combined = combined.dropDuplicates(["article_id"])
-
     after = combined.count()
+
     logger.success(
         f"[AGGREGATE] Selesai: {before} → {after} artikel unik "
         f"(duplikat dihapus: {before - after})"
     )
 
-    # Statistik per source
     logger.info("[AGGREGATE] Distribusi per source:")
     combined.groupBy("source").count().orderBy("source").show()
 
-    # Statistik per tahun
     logger.info("[AGGREGATE] Distribusi per tahun:")
     combined.groupBy("year").count().orderBy("year").show()
 
@@ -312,7 +294,7 @@ def load(df: DataFrame) -> None:
     (
         df.write
         .mode("overwrite")
-        .partitionBy("year", "month")           # partisi per tahun & bulan
+        .partitionBy("year", "month")
         .parquet(OUTPUT_PATH)
     )
 
@@ -332,7 +314,6 @@ def run_preprocessing():
     logger.info(f"  Start: {start_time.isoformat()}")
     logger.info("=" * 55)
 
-    # Kirim alert mulai
     send_telegram(
         "⚙️ <b>Preprocessing Dimulai</b>\n"
         f"{'─' * 30}\n"
@@ -340,13 +321,9 @@ def run_preprocessing():
         f"📦 Source: {', '.join(SOURCES)}"
     )
 
-    # Buat SparkSession
     spark = create_spark_session("EuroNewsPreprocessing")
-
-    # Pastikan bucket output ada
     ensure_bucket(BUCKET_PROCESSED)
 
-    # ── Pipeline per source ───────────────────
     processed_dfs = []
     stats = {}
 
@@ -365,8 +342,12 @@ def run_preprocessing():
             # 2. Clean
             clean_df = clean(raw_df, source)
 
-            # 3. Normalize
-            norm_df = normalize(clean_df, source)
+            # 3. Language filter — dilakukan SEBELUM normalize,
+            #    biar artikel non-English gak ikut diproses lebih jauh
+            lang_df = filter_english(clean_df, text_col="raw_text")
+
+            # 4. Normalize
+            norm_df = normalize(lang_df, source)
 
             processed_dfs.append(norm_df)
             stats[source] = norm_df.count()
@@ -382,17 +363,17 @@ def run_preprocessing():
         spark.stop()
         return
 
-    # 4. Aggregate
+    # 5. Aggregate
     logger.info("\n" + "─" * 40)
     final_df = aggregate(processed_dfs)
 
-    # 5. Load
+    # 6. Load
     logger.info("\n" + "─" * 40)
     load(final_df)
 
     # ── Summary ───────────────────────────────
-    end_time   = datetime.now(timezone.utc)
-    duration   = (end_time - start_time).seconds
+    end_time = datetime.now(timezone.utc)
+    duration = (end_time - start_time).seconds
     total_rows = final_df.count()
 
     source_lines = ""

@@ -11,6 +11,8 @@ from pyspark.sql.types import (
 )
 
 # ── Schema raw JSON dari MinIO ────────────────────────────
+# Dipakai saat extract() supaya semua source dipaksa ke struktur
+# kolom yang sama walau field-nya beda-beda per source.
 RAW_SCHEMA = StructType([
     StructField("title",        StringType(),    True),
     StructField("url",          StringType(),    True),
@@ -19,7 +21,7 @@ RAW_SCHEMA = StructType([
     StructField("source_tier",  IntegerType(),   True),
     StructField("category",     StringType(),    True),
     StructField("raw_text",     StringType(),    True),
-    StructField("language",     StringType(),    True),
+    StructField("language",     StringType(),    True),  # mentah dari source, TIDAK reliable untuk filter
     StructField("provider",     StringType(),    True),
     StructField("tone",         FloatType(),     True),  # khusus GDELT
     StructField("author",       StringType(),    True),  # khusus NewsAPI
@@ -30,9 +32,9 @@ RAW_SCHEMA = StructType([
 
 # ── Schema output setelah preprocessing ──────────────────
 PROCESSED_SCHEMA = StructType([
-    StructField("article_id",   StringType(),    False),  # hash unik MD5
+    StructField("article_id",   StringType(),    False),  # hash unik MD5 dari URL
     StructField("title",        StringType(),    True),
-    StructField("clean_text",   StringType(),    True),   # raw_text sudah bersih
+    StructField("clean_text",   StringType(),    True),   # raw_text sudah dibersihkan
     StructField("published_at", TimestampType(), True),
     StructField("year",         IntegerType(),   True),
     StructField("month",        IntegerType(),   True),
@@ -40,7 +42,7 @@ PROCESSED_SCHEMA = StructType([
     StructField("source",       StringType(),    True),
     StructField("source_tier",  IntegerType(),   True),
     StructField("category",     StringType(),    True),
-    StructField("language",     StringType(),    True),
+    StructField("language",     StringType(),    True),   # hasil deteksi fastText, bukan asumsi
     StructField("provider",     StringType(),    True),
     StructField("tone",         FloatType(),     True),
     StructField("url",          StringType(),    True),

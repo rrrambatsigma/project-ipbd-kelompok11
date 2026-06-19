@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   # ─────────────────────────────────────────
   # SPARK — PySpark job runner
@@ -23,10 +21,10 @@ services:
       SPARK_DRIVER_MEMORY: 2g
       SPARK_EXECUTOR_MEMORY: 2g
     volumes:
-      - ./spark/jobs:/app/jobs # mount job scripts
+      - ./spark/jobs:/app/jobs
       - spark-logs:/app/logs
     networks:
-      - preprocessing-net
+      - ingestion-net
     command: >
       sh -c "tail -f /dev/null"
 
@@ -34,7 +32,6 @@ volumes:
   spark-logs:
 
 networks:
-  preprocessing-net:
-    driver: bridge
-    # Hubungkan ke network ingestion supaya bisa akses MinIO
-    external: false
+  ingestion-net:
+    external: true
+    name: ingestion_ingestion-net
