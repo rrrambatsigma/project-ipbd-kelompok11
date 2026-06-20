@@ -17,9 +17,10 @@ services:
       # Telegram
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-      # Spark tuning
-      SPARK_DRIVER_MEMORY: 2g
-      SPARK_EXECUTOR_MEMORY: 2g
+      # Spark tuning (dikecilin biar nggak OOM)
+      SPARK_DRIVER_MEMORY: 1g
+      SPARK_EXECUTOR_MEMORY: 1g
+
     volumes:
       - ./spark/jobs:/app/jobs
       - spark-logs:/app/logs

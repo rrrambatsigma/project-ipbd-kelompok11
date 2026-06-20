@@ -59,10 +59,19 @@ def create_spark_session(app_name: str = "EuroNewsPreprocessing") -> SparkSessio
                 "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
 
         # ── Spark tuning ─────────────────────────────
-        .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "2g"))
-        .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "2g"))
-        .config("spark.sql.shuffle.partitions", "4")
+        .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "1g"))
+        .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "1g"))
+        .config("spark.sql.shuffle.partitions", "2")
         .config("spark.ui.showConsoleProgress", "false")
+        .config("spark.memory.fraction", "0.6")
+        .config("spark.memory.storageFraction", "0.3")
+
+        # ── S3A fast upload ───────────────────────────
+        .config("spark.hadoop.fs.s3a.fast.upload", "true")
+        .config("spark.hadoop.fs.s3a.multipart.size", "64M")
+        .config("spark.hadoop.fs.s3a.fast.upload.buffer", "bytebuffer")
+        .config("spark.hadoop.fs.s3a.connection.timeout", "600000")
+        .config("spark.hadoop.fs.s3a.connection.maximum", "20")
 
         .getOrCreate()
     )

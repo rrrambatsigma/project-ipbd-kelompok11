@@ -24,7 +24,7 @@ from pyspark.sql.types import StringType
 
 MODEL_PATH = os.getenv(
     "FASTTEXT_LID_PATH",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "models", "lid.176.ftz"),
+    "/app/jobs/models/lid.176.ftz",
 )
 
 _model = None  # lazy-loaded sekali per executor process
