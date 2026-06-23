@@ -38,15 +38,9 @@ def create_spark_session(app_name: str = "EuroNewsPreprocessing") -> SparkSessio
         .appName(app_name)
         .master("local[*]")
 
-        # ── Hadoop S3A jars (lokal, pre-downloaded saat Docker build) ──
-        # Pakai spark.jars (path lokal) BUKAN spark.jars.packages,
-        # supaya Spark gak coba resolve/download dari Maven Central
-        # tiap kali SparkSession dibuat (container gak ada akses internet runtime).
-        .config(
-            "spark.jars",
-            "/opt/spark-jars/hadoop-aws-3.3.4.jar,"
-            "/opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar",
-        )
+        # ── Hadoop-AWS + AWS SDK via Maven ─────────────
+        # Spark resolve dari Maven Central, cache di ~/.ivy2
+        .config("spark.jars.packages", "org.apache.hadoop:hadoop-aws:3.4.2")
 
         # ── S3A → MinIO konfigurasi ──────────────────
         .config("spark.hadoop.fs.s3a.endpoint", f"http://{endpoint}")

@@ -1,4 +1,4 @@
-pyspark==3.5.1
+pyspark>=3.5.0
 boto3
 python-dotenv
 loguru
@@ -8,3 +8,6 @@ pyarrow
 fasttext-wheel
 nltk==3.8.1
 numpy==1.26.4
+prefect==2.20.25
+anyio==4.4.0
+pydantic<2.12

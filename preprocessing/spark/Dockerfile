@@ -19,13 +19,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m nltk.downloader -d /usr/share/nltk_data \
     stopwords wordnet vader_lexicon punkt averaged_perceptron_tagger
 
-# ── Pre-download jar Hadoop-AWS & AWS SDK saat BUILD ───────
-# Supaya Spark gak perlu akses internet lagi tiap kali container jalan
-RUN mkdir -p /opt/spark-jars && \
-    wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
-    -O /opt/spark-jars/hadoop-aws-3.3.4.jar && \
-    wget -q https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.262/aws-java-sdk-bundle-1.12.262.jar \
-    -O /opt/spark-jars/aws-java-sdk-bundle-1.12.262.jar
+# ── Pre-cache Hadoop-AWS dependency via Ivy ──────────────
+# spark-submit --packages akan nge-download hadoop-aws + AWS SDK v2
+# beserta transitive deps ke /root/.ivy2 agar runtime offline.
+RUN echo 'import sys; sys.exit(0)' > /tmp/dummy.py && \
+    spark-submit --packages org.apache.hadoop:hadoop-aws:3.4.2 \
+    --repositories https://repo1.maven.org/maven2 \
+    --conf "spark.app.name=cache" /tmp/dummy.py 2>&1; \
+    rm -f /tmp/dummy.py
 
 COPY . .
 
@@ -36,8 +37,9 @@ RUN mkdir -p /app/jobs/models && \
     fi
 
 RUN mkdir -p /app/logs
+RUN chmod +x /app/entrypoint.sh
 
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
-CMD ["tail", "-f", "/dev/null"]
+ENTRYPOINT ["/app/entrypoint.sh"]

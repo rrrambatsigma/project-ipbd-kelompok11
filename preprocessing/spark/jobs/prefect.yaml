@@ -1,0 +1,22 @@
+name: euro-news-preprocessing
+prefect-version: "2.*"
+
+build: null
+push: null
+
+pull:
+  - prefect.deployments.steps.set_working_directory:
+      directory: /app/jobs
+
+# Deployment di-register otomatis oleh entrypoint.sh via Python API.
+# File ini masih ada sebagai referensi / fallback.
+deployments:
+  - name: euro-news-preprocessing
+    entrypoint: preprocessing_flow.py:preprocessing_flow
+    work_pool:
+      name: preprocessing-pool
+    schedules:
+      - cron: "0 16 * * 1-5"
+        timezone: "UTC"
+        active: true
+    tags: [news-preprocessing, euro-market]

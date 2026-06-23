@@ -1,22 +1,27 @@
 services:
   # ─────────────────────────────────────────
-  # SPARK — PySpark job runner
+  # SPARK — PySpark job runner + Prefect Worker
   # ─────────────────────────────────────────
   spark:
     build:
       context: ./spark
       dockerfile: Dockerfile
     container_name: preprocessing-spark
+    restart: unless-stopped
     environment:
-      # MinIO (sama dengan ingestion)
+      # MinIO
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
       MINIO_BUCKET_RAW: news-raw
       MINIO_BUCKET_PROCESSED: news-processed
-      # Telegram
+      # Telegram (beda bot dari ingestion)
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      # Prefect
+      PREFECT_API_URL: http://prefect-server:4200/api
+      # Timezone
+      TZ: Asia/Jakarta
       # Spark tuning (dikecilin biar nggak OOM)
       SPARK_DRIVER_MEMORY: 1g
       SPARK_EXECUTOR_MEMORY: 1g
@@ -26,8 +31,13 @@ services:
       - spark-logs:/app/logs
     networks:
       - ingestion-net
-    command: >
-      sh -c "tail -f /dev/null"
+    entrypoint: ["/app/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'prefect worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
 
 volumes:
   spark-logs:

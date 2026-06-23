@@ -18,12 +18,12 @@ RAW_SCHEMA = StructType([
     StructField("url",          StringType(),    True),
     StructField("published_at", StringType(),    True),  # string dulu, nanti di-cast
     StructField("source",       StringType(),    True),
-    StructField("source_tier",  IntegerType(),   True),
+    StructField("source_tier",  StringType(),    True),  # string dulu — data mentah kadang "60s"
     StructField("category",     StringType(),    True),
     StructField("raw_text",     StringType(),    True),
     StructField("language",     StringType(),    True),  # mentah dari source, TIDAK reliable untuk filter
     StructField("provider",     StringType(),    True),
-    StructField("tone",         FloatType(),     True),  # khusus GDELT
+    StructField("tone",         StringType(),    True),  # string dulu — GDELT tone kadang aneh
     StructField("author",       StringType(),    True),  # khusus NewsAPI
     StructField("_ingested_at", StringType(),    True),
     StructField("_source_tier", StringType(),    True),
