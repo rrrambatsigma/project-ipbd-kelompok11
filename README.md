@@ -82,7 +82,18 @@ E:\project-ipbd-kelompok11\
 │           └── sentiment_udfs.py     ← Semua UDF
 │
 ├───modelling\                       ← 🟠 MODELLING
-│   │   (akan diisi: LDA, TF-IDF, classifier)
+│   │   README.md                    ← Panduan lengkap + diagram + step-by-step
+│   │   run_pipeline.py              ← Orchestrator utama
+│   │   lda_pipeline.py              ← LDA Topic Modeling (CountVec → LDA → topik)
+│   │   sentiment_trainer.py         ← TF-IDF + LogisticRegression (label: VADER)
+│   │   data_loader.py               ← Baca artikel dari MinIO via pyarrow
+│   │   evaluator.py                 ← Metrics, coherence, confusion matrix
+│   │   model_store.py               ← Simpan/load .pkl ke MinIO
+│   │   monitor.py                   ← Riwayat performa antar run
+│   │   config.py                    ← Constants
+│   │   modelling_flow.py            ← Prefect flow wrapper
+│   │   prefect.yaml                 ← Deployment cron (22:30 WIB)
+│   │   entrypoint.sh                ← Startup container
 │   │
 │   └───models\                      ← Hasil model (.pkl) → MinIO
 │
@@ -206,7 +217,7 @@ docker exec preprocessing-spark spark-submit ^
 | 21:00 | Ingestion Overlap | ~5 menit | Prefect |
 | **22:00** | **Preprocessing** | ~15 menit | PySpark |
 | **22:30** | **Modelling retrain** | ~2 menit | scikit-learn |
-| 23:00 | Serving update | auto | Dashboard |
+| 23:00 | Serving update | auto | Dashboard (nanti) |
 
 ---
 
@@ -219,13 +230,13 @@ isi .env (API key)
 docker compose up -d
 ```
 
-### 2. Start preprocessing service
+### 2. Start preprocessing + modelling service
 ```powershell
 cd E:\project-ipbd-kelompok11\preprocessing
 docker compose up -d
 ```
 
-### 3. Build Docker image preprocessing (1x setelah ubah dependencies)
+### 3. Build Docker image (1x setelah ubah dependencies)
 ```powershell
 cd E:\project-ipbd-kelompok11\preprocessing
 docker compose build
@@ -239,9 +250,15 @@ docker exec preprocessing-spark spark-submit ^
   jobs/news_sentiment_job.py --raw
 ```
 
-### 5. Jalankan modelling manual (testing)
+### 5. Start modelling service
 ```powershell
-docker exec preprocessing-spark python jobs/run_modelling.py
+cd E:\project-ipbd-kelompok11\preprocessing
+docker compose up -d modelling
+```
+
+### 6. Jalankan modelling manual (testing)
+```powershell
+docker exec preprocessing-modelling python run_pipeline.py
 ```
 
 ---
@@ -253,6 +270,8 @@ docker exec preprocessing-spark python jobs/run_modelling.py
 | MinIO Console | http://localhost:9001 |
 | Prefect UI | http://localhost:4200 |
 | Selenium | http://localhost:4444 |
+| Spark Worker | `preprocessing-spark` |
+| Modelling Worker | `preprocessing-modelling` |
 
 Login MinIO: `minioadmin` / `minioadmin123`
 

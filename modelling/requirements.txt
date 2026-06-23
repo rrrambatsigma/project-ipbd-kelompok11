@@ -1,0 +1,11 @@
+scikit-learn==1.4.2
+pandas==2.1.4
+pyarrow>=14.0.1
+boto3>=1.34.0
+joblib>=1.3.2
+python-dotenv>=1.0.0
+loguru>=0.7.2
+numpy>=1.26.4
+prefect==2.20.25
+anyio==4.4.0
+pydantic<2.12
