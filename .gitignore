@@ -14,10 +14,10 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
-ingestion/collector/flows/__pycache__/*
-ingestion/collector/flows/scrapers/__pycache__/*
-ingestion/collector/flows/storage/__pycache__/*
-ingestion/collector/flows/utils/__pycache__/*
+ingestion/collector/flows/__pycache__/*.pyc
+ingestion/collector/flows/scrapers/__pycache__/*.pyc
+ingestion/collector/flows/storage/__pycache__/*.pyc
+ingestion/collector/flows/utils/__pycache__/*.pyc
 
 # ─────────────────────────────────────────
 # Model binaries — terlalu besar untuk Git
