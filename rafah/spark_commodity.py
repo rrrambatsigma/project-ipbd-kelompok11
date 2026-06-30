@@ -26,10 +26,16 @@ import hashlib
 import statistics
 import sys
 import os
+import io
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+import boto3
+from botocore.client import Config
 
 from kafka import KafkaConsumer
 import psycopg2
@@ -62,6 +68,105 @@ PRICE_BOUNDS = {
     "SI=F":    (5,     200),     # Silver futures
 }
 DEFAULT_BOUNDS = (0.01, 1_000_000)
+
+# ── Konfigurasi MinIO ─────────────────────────────────────────────────────
+MINIO_ENDPOINT   = "http://localhost:9000"
+MINIO_ACCESS_KEY = "minioadmin"
+MINIO_SECRET_KEY = "minioadmin"
+MINIO_BUCKET     = "commodity-eur"
+
+# Arrow schemas untuk Parquet
+BRONZE_SCHEMA = pa.schema([
+    pa.field("symbol",     pa.string()),
+    pa.field("commodity",  pa.string()),
+    pa.field("price",      pa.float64()),
+    pa.field("event_time", pa.string()),
+    pa.field("source",     pa.string()),
+])
+
+SILVER_SCHEMA = pa.schema([
+    pa.field("symbol",           pa.string()),
+    pa.field("commodity",        pa.string()),
+    pa.field("window_start",     pa.string()),
+    pa.field("window_end",       pa.string()),
+    pa.field("open_price",       pa.float64()),
+    pa.field("close_price",      pa.float64()),
+    pa.field("avg_price",        pa.float64()),
+    pa.field("volatility",       pa.float64()),
+    pa.field("tick_count",       pa.int32()),
+    pa.field("price_change",     pa.float64()),
+    pa.field("price_change_pct", pa.float64()),
+    pa.field("label",            pa.string()),
+    pa.field("source",           pa.string()),
+])
+
+
+def init_minio_bucket():
+    """Buat bucket commodity-eur di MinIO jika belum ada. Return s3 client."""
+    try:
+        client = boto3.client(
+            "s3",
+            endpoint_url=MINIO_ENDPOINT,
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
+        existing = [b["Name"] for b in client.list_buckets().get("Buckets", [])]
+        if MINIO_BUCKET not in existing:
+            client.create_bucket(Bucket=MINIO_BUCKET)
+            print(f"[MinIO] Bucket '{MINIO_BUCKET}' dibuat.")
+        else:
+            print(f"[MinIO] Bucket '{MINIO_BUCKET}' sudah ada.")
+        return client
+    except Exception as e:
+        print(f"[MinIO] ⚠️  Gagal inisialisasi bucket: {e}")
+        return None
+
+
+def upload_parquet(records: list, schema: pa.Schema, s3_key: str):
+    """Konversi list of dict → Parquet (snappy) → upload ke MinIO. Silent fail."""
+    if not records:
+        return
+    try:
+        # Serialisasi datetime ke string agar kompatibel dengan Arrow schema
+        serialized = []
+        for r in records:
+            row = {}
+            for field in schema:
+                val = r.get(field.name)
+                if val is None:
+                    row[field.name] = None
+                elif isinstance(val, datetime):
+                    row[field.name] = val.isoformat()
+                elif field.type == pa.int32():
+                    row[field.name] = int(val)
+                else:
+                    row[field.name] = val
+            serialized.append(row)
+
+        table = pa.Table.from_pylist(serialized, schema=schema)
+        buf = io.BytesIO()
+        pq.write_table(table, buf, compression="snappy")
+        buf.seek(0)
+
+        client = boto3.client(
+            "s3",
+            endpoint_url=MINIO_ENDPOINT,
+            aws_access_key_id=MINIO_ACCESS_KEY,
+            aws_secret_access_key=MINIO_SECRET_KEY,
+            config=Config(signature_version="s3v4"),
+            region_name="us-east-1",
+        )
+        client.put_object(
+            Bucket=MINIO_BUCKET,
+            Key=s3_key,
+            Body=buf.getvalue(),
+            ContentType="application/octet-stream",
+        )
+        print(f"[MinIO] ✅ s3://{MINIO_BUCKET}/{s3_key} ({len(records)} rows)")
+    except Exception as e:
+        print(f"[MinIO] ⚠️  Gagal upload {s3_key}: {e}")
 
 
 # ── Koneksi PostgreSQL ────────────────────────────────────────────────────
@@ -235,6 +340,15 @@ def flush_bronze(conn, records):
     except Exception as e:
         conn.rollback()
         notify_error("spark_commodity Bronze", str(e))
+        return
+
+    # Upload ke MinIO Parquet
+    now = datetime.now()
+    s3_key = (
+        f"bronze/{now.strftime('%Y/%m/%d')}/"
+        f"commodity_raw_{now.strftime('%H%M%S')}.parquet"
+    )
+    upload_parquet(records, BRONZE_SCHEMA, s3_key)
 
 
 def flush_silver(conn, windows: dict) -> list:
@@ -270,6 +384,16 @@ def flush_silver(conn, windows: dict) -> list:
     except Exception as e:
         conn.rollback()
         notify_error("spark_commodity Silver", str(e))
+        return rows
+
+    # Upload ke MinIO Parquet
+    now = datetime.now()
+    s3_key = (
+        f"silver/{now.strftime('%Y/%m/%d')}/"
+        f"commodity_silver_{now.strftime('%H%M%S')}.parquet"
+    )
+    upload_parquet(rows, SILVER_SCHEMA, s3_key)
+
     return rows
 
 
@@ -339,6 +463,7 @@ def flush_gold(conn, silver_rows: list):
 def main():
     conn = connect_postgres()
     init_tables(conn)
+    init_minio_bucket()
 
     consumer = KafkaConsumer(
         TOPIC,

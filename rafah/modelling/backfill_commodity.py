@@ -68,6 +68,31 @@ def backfill(symbol: str, commodity: str, start: str = "2021-01-01"):
     conn = psycopg2.connect(**PG_CONFIG)
     cur  = conn.cursor()
 
+    # Buat tabel kalau belum ada
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS commodity_daily (
+            id               SERIAL           PRIMARY KEY,
+            trade_date       DATE             NOT NULL,
+            symbol           VARCHAR(20)      NOT NULL,
+            commodity        VARCHAR(30)      NOT NULL,
+            open_price       DOUBLE PRECISION,
+            high_price       DOUBLE PRECISION,
+            low_price        DOUBLE PRECISION,
+            close_price      DOUBLE PRECISION,
+            avg_price        DOUBLE PRECISION,
+            volatility       DOUBLE PRECISION,
+            price_change     DOUBLE PRECISION,
+            price_change_pct DOUBLE PRECISION,
+            ma5              DOUBLE PRECISION,
+            ma10             DOUBLE PRECISION,
+            tick_count       INTEGER          DEFAULT 0,
+            label            VARCHAR(10),
+            updated_at       TIMESTAMP        DEFAULT NOW(),
+            UNIQUE (trade_date, symbol)
+        );
+    """)
+    conn.commit()
+
     # Hapus data lama untuk simbol ini
     cur.execute("DELETE FROM commodity_daily WHERE symbol = %s", (symbol,))
     conn.commit()
