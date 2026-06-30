@@ -65,6 +65,23 @@ services:
         echo '[OK] Bucket kurs-eur siap.';
       "
 
+  # ── Grafana (Dashboard Monitoring) ────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana_kurs_eur
+    ports:
+      - "3001:3000"   # port 3001 di host agar tidak bentrok dengan Grafana lain
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - postgres
+
 volumes:
   postgres_data:
   minio_data:
+  grafana_data:

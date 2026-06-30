@@ -1,0 +1,30 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Model binary (besar, bisa di-generate ulang)
+modelling/*.pkl
+
+# Checkpoint Spark
+/tmp/checkpoint/
+
+# macOS
+.DS_Store
+
+# Environment variables / secrets
+.env
+*.env
+
+# Ivy cache (JAR Spark)
+.ivy2/
+
+# Log files
+*.log

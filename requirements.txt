@@ -1,0 +1,37 @@
+# requirements.txt — IPBD Kelompok 11 (JOJO)
+# Semua dependencies yang digunakan dalam pipeline EUR/USD kurs & sentimen
+# Generated: 2026-06-30
+
+# ── Data Ingestion & Streaming ────────────────────────────────────────────
+yfinance==0.2.65
+kafka-python-ng==2.2.3
+
+# ── Database & Storage ────────────────────────────────────────────────────
+psycopg2-binary==2.9.12
+boto3==1.43.37
+pyarrow==23.0.0
+
+# ── Data Processing ───────────────────────────────────────────────────────
+pandas==2.3.3
+numpy==2.4.6
+
+# ── Machine Learning ──────────────────────────────────────────────────────
+scikit-learn==1.8.0
+xgboost==3.2.0
+imbalanced-learn==0.14.2
+joblib==1.5.2
+shap==0.51.0
+
+# ── Visualisation ─────────────────────────────────────────────────────────
+matplotlib==3.11.0
+seaborn==0.13.2
+
+# ── Serving (FastAPI) ─────────────────────────────────────────────────────
+fastapi==0.115.14
+uvicorn==0.35.0
+requests==2.34.2
+
+# ── Utilities ─────────────────────────────────────────────────────────────
+python-dateutil==2.9.0.post0
+pytz==2026.2
+botocore==1.43.37

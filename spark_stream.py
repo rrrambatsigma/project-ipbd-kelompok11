@@ -1,12 +1,11 @@
 """
 spark_stream.py — IPBD Kelompok 11 (JOJO)
-Pipeline: Kafka → Python Consumer → Preprocessing → PostgreSQL
+Pipeline: Kafka → Python Consumer → Preprocessing → PostgreSQL + MinIO (Parquet)
 
 Layer:
-  Bronze  → kurs_raw       : tick mentah yang sudah divalidasi
-  Silver  → kurs_silver    : aggregasi per window 1 menit + fitur
-  Gold    → kurs_daily     : ringkasan harian + label arah + moving average
-                             (tabel ini dipakai bersama Rafah & Rambat untuk modelling)
+  Bronze  → kurs_raw (PostgreSQL) + s3://kurs-eur/bronze/ (Parquet)
+  Silver  → kurs_silver (PostgreSQL) + s3://kurs-eur/silver/ (Parquet)
+  Gold    → kurs_daily (PostgreSQL) — serving layer untuk modelling bersama
 
 Tahapan preprocessing:
   1. Validasi schema  (symbol, price, event_time, source)
@@ -22,13 +21,23 @@ Tahapan preprocessing:
 import json
 import time
 import hashlib
+import io
 import statistics
 from datetime import datetime, timezone, timedelta, date
 from collections import defaultdict
 
+import pyarrow as pa
+import pyarrow.parquet as pq
+import boto3
+from botocore.client import Config
+
 from kafka import KafkaConsumer
 import psycopg2
 from psycopg2.extras import execute_batch
+from telegram_notifier import (
+    notify_startup, notify_preprocessing,
+    notify_gold, notify_error, notify_shutdown
+)
 
 print("=" * 60)
 print("  STREAM PROCESSOR: KURS EUR — IPBD Kelompok 11")
@@ -48,8 +57,79 @@ WINDOW_SECONDS = 60    # window aggregasi 1 menit
 FLUSH_INTERVAL = 30    # kirim ke DB setiap 30 detik
 
 # Threshold labeling perubahan kurs harian
-# Jika |price_change_pct| < STABLE_THRESHOLD → stabil
 STABLE_THRESHOLD = 0.05   # 0.05%
+
+# ── Konfigurasi MinIO (S3-compatible) ─────────────────────────────────────
+MINIO_CONFIG = {
+    "endpoint_url":          "http://localhost:9000",
+    "aws_access_key_id":     "minioadmin",
+    "aws_secret_access_key": "minioadmin",
+}
+MINIO_BUCKET = "kurs-eur"
+
+def get_minio_client():
+    return boto3.client(
+        "s3",
+        endpoint_url=MINIO_CONFIG["endpoint_url"],
+        aws_access_key_id=MINIO_CONFIG["aws_access_key_id"],
+        aws_secret_access_key=MINIO_CONFIG["aws_secret_access_key"],
+        config=Config(signature_version="s3v4"),
+        region_name="us-east-1"
+    )
+
+def upload_parquet(records: list, schema: pa.Schema, s3_key: str):
+    """
+    Konversi list of dict → Parquet → upload ke MinIO.
+    s3_key contoh: bronze/2026/06/30/kurs_raw_113045.parquet
+    """
+    if not records:
+        return
+    try:
+        # Buat Arrow Table dari list of dict
+        table = pa.Table.from_pylist(records, schema=schema)
+
+        # Tulis ke buffer in-memory
+        buf = io.BytesIO()
+        pq.write_table(table, buf, compression="snappy")
+        buf.seek(0)
+
+        # Upload ke MinIO
+        s3 = get_minio_client()
+        s3.put_object(
+            Bucket=MINIO_BUCKET,
+            Key=s3_key,
+            Body=buf.getvalue(),
+            ContentType="application/octet-stream"
+        )
+        print(f"[MinIO] ✅ Uploaded → s3://{MINIO_BUCKET}/{s3_key} ({len(records)} rows)")
+    except Exception as e:
+        print(f"[MinIO] ⚠️  Gagal upload {s3_key}: {e}")
+
+
+# ── Arrow Schema untuk Parquet ────────────────────────────────────────────
+
+BRONZE_SCHEMA = pa.schema([
+    pa.field("symbol",     pa.string()),
+    pa.field("price",      pa.float64()),
+    pa.field("event_time", pa.string()),   # datetime as string
+    pa.field("source",     pa.string()),
+    pa.field("ingested_at",pa.string()),
+])
+
+SILVER_SCHEMA = pa.schema([
+    pa.field("symbol",           pa.string()),
+    pa.field("window_start",     pa.string()),
+    pa.field("window_end",       pa.string()),
+    pa.field("open_price",       pa.float64()),
+    pa.field("close_price",      pa.float64()),
+    pa.field("avg_price",        pa.float64()),
+    pa.field("volatility",       pa.float64()),
+    pa.field("tick_count",       pa.int32()),
+    pa.field("price_change",     pa.float64()),
+    pa.field("price_change_pct", pa.float64()),
+    pa.field("label",            pa.string()),
+    pa.field("source",           pa.string()),
+])
 
 # ── Koneksi PostgreSQL ────────────────────────────────────────────────────
 def connect_postgres():
@@ -57,9 +137,11 @@ def connect_postgres():
         conn = psycopg2.connect(**PG_CONFIG)
         conn.autocommit = False
         print("[INFO] Berhasil terhubung ke PostgreSQL.")
+        notify_startup("spark_stream.py — Stream Processor")
         return conn
     except Exception as e:
         print(f"[ERROR] Gagal koneksi PostgreSQL: {e}")
+        notify_error("spark_stream.py", f"Gagal koneksi PostgreSQL: {e}")
         raise
 
 
@@ -122,6 +204,9 @@ def init_tables(conn):
                 UNIQUE (trade_date, symbol)
             );
         """)
+
+        # ── Drop view lama dulu sebelum recreate ─────────────────────
+        cur.execute("DROP VIEW IF EXISTS v_market_signals;")
 
         # ── View untuk modelling bersama (Jojo + Rafah + Rambat) ─────
         # View ini menggabungkan kurs_daily dengan tabel komoditas & sentimen
@@ -256,10 +341,30 @@ def flush_bronze(conn, records: list):
         INSERT INTO kurs_raw (symbol, price, event_time, source)
         VALUES (%(symbol)s, %(price)s, %(event_time)s, %(source)s)
     """
-    with conn.cursor() as cur:
-        execute_batch(cur, sql, records)
-    conn.commit()
-    print(f"[Bronze] {len(records)} baris → kurs_raw")
+    try:
+        with conn.cursor() as cur:
+            execute_batch(cur, sql, records)
+        conn.commit()
+        print(f"[Bronze] {len(records)} baris → kurs_raw (PostgreSQL)")
+    except Exception as e:
+        conn.rollback()
+        notify_error("spark_stream.py Bronze", str(e))
+        raise
+
+    # ── Upload ke MinIO sebagai Parquet ──────────────────────────────
+    now = datetime.now()
+    s3_key = (
+        f"bronze/{now.year}/{now.month:02d}/{now.day:02d}/"
+        f"kurs_raw_{now.strftime('%H%M%S')}.parquet"
+    )
+    parquet_records = [{
+        "symbol":      r["symbol"],
+        "price":       r["price"],
+        "event_time":  r["event_time"].isoformat(),
+        "source":      r["source"],
+        "ingested_at": now.isoformat(),
+    } for r in records]
+    upload_parquet(parquet_records, BRONZE_SCHEMA, s3_key)
 
 
 def flush_silver(conn, windows: dict) -> list:
@@ -286,16 +391,50 @@ def flush_silver(conn, windows: dict) -> list:
             %(price_change)s, %(price_change_pct)s, %(label)s, %(source)s
         )
     """
-    with conn.cursor() as cur:
-        execute_batch(cur, sql, rows)
-    conn.commit()
+    try:
+        with conn.cursor() as cur:
+            execute_batch(cur, sql, rows)
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        notify_error("spark_stream.py Silver", str(e))
+        raise
 
-    print(f"[Silver] {len(rows)} window → kurs_silver")
+    print(f"[Silver] {len(rows)} window → kurs_silver (PostgreSQL)")
     for r in rows:
         print(f"  → {r['symbol']:12s} | {r['window_start'].strftime('%H:%M')} "
               f"| open={r['open_price']:.5f} close={r['close_price']:.5f} "
               f"| Δ={r['price_change']:+.5f} ({r['price_change_pct']:+.4f}%) "
               f"| vol={r['volatility']:.5f} | label={r['label']}")
+
+    # ── Upload ke MinIO sebagai Parquet ──────────────────────────────
+    now = datetime.now()
+    s3_key = (
+        f"silver/{now.year}/{now.month:02d}/{now.day:02d}/"
+        f"kurs_silver_{now.strftime('%H%M%S')}.parquet"
+    )
+    parquet_records = [{
+        "symbol":           r["symbol"],
+        "window_start":     r["window_start"].isoformat(),
+        "window_end":       r["window_end"].isoformat(),
+        "open_price":       r["open_price"],
+        "close_price":      r["close_price"],
+        "avg_price":        r["avg_price"],
+        "volatility":       r["volatility"],
+        "tick_count":       r["tick_count"],
+        "price_change":     r["price_change"],
+        "price_change_pct": r["price_change_pct"],
+        "label":            r["label"],
+        "source":           r["source"],
+    } for r in rows]
+    upload_parquet(parquet_records, SILVER_SCHEMA, s3_key)
+
+    # Notifikasi Telegram preprocessing
+    notify_preprocessing(
+        bronze_count=0,
+        silver_count=len(rows),
+        windows=rows
+    )
 
     return rows
 
@@ -379,6 +518,20 @@ def flush_gold(conn, silver_rows: list):
             ))
 
     conn.commit()
+
+    # Kumpulkan data untuk notifikasi Gold
+    gold_entries = []
+    for (symbol, trade_date), rows in daily.items():
+        all_prices = []
+        for r in rows:
+            all_prices += [r["open_price"], r["close_price"]]
+        close_p   = rows[-1]["close_price"]
+        chg_pct   = round((close_p - rows[0]["open_price"]) / rows[0]["open_price"] * 100, 4) if rows[0]["open_price"] else 0.0
+        label     = compute_label(chg_pct)
+        ma5_val   = round(sum(all_prices[:5]) / min(5, len(all_prices)), 6)
+        gold_entries.append((symbol, trade_date, close_p, chg_pct, label, ma5_val))
+
+    notify_gold(gold_entries)
     print(f"[Gold]   {len(daily)} entri harian → kurs_daily (MA5, MA10, label)")
 
 
@@ -405,6 +558,7 @@ def main():
     silver_windows = defaultdict(list)
     seen_dedup     = set()
     last_flush     = time.time()
+    total_tick     = 0
 
     try:
         for message in consumer:
@@ -420,6 +574,7 @@ def main():
             seen_dedup.add(key)
 
             bronze_buffer.append(record)
+            total_tick += 1
 
             window_start = get_window_key(record["event_time"], WINDOW_SECONDS)
             silver_windows[(record["symbol"], window_start)].append(record["price"])
@@ -443,6 +598,15 @@ def main():
         flush_bronze(conn, bronze_buffer)
         silver_rows = flush_silver(conn, silver_windows)
         flush_gold(conn, silver_rows)
+        notify_shutdown("spark_stream.py", {
+            "total_tick": total_tick,
+            "bronze":     len(bronze_buffer),
+            "silver":     len(silver_windows),
+            "gold":       len(set(d.date() for _, d in silver_windows.keys())) if silver_windows else 0
+        })
+    except Exception as e:
+        notify_error("spark_stream.py", str(e))
+        raise
     finally:
         consumer.close()
         conn.close()
