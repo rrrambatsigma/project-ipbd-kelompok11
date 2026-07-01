@@ -11,3 +11,4 @@ numpy==1.26.4
 prefect==2.20.25
 anyio==4.4.0
 pydantic<2.12
+prometheus-client==0.21.1

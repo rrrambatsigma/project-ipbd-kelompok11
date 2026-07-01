@@ -218,6 +218,47 @@ services:
         tail -f /dev/null
       "
 
+  # ─────────────────────────────────────────
+  # PUSHGATEWAY — Nampung metrics dari batch job
+  # ─────────────────────────────────────────
+  pushgateway:
+    image: prom/pushgateway:latest
+    ports:
+      - "9091:9091"
+    networks:
+      - ingestion-net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # PROMETHEUS — Time-series database + scraper
+  # ─────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - ingestion-net
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────
+  # GRAFANA — Dashboard UI
+  # ─────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - ingestion-net
+    restart: unless-stopped
+
 # ─────────────────────────────────────────
 # VOLUMES & NETWORKS
 # ─────────────────────────────────────────
@@ -226,6 +267,8 @@ volumes:
   minio-data:
   prefect-data:
   logs:
+  prometheus-data:
+  grafana-data:
 
 networks:
   ingestion-net:

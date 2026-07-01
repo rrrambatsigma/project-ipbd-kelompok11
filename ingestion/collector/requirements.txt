@@ -26,3 +26,6 @@ griffe==0.36.0
 
 # Pydantic v1 (kompatibel dengan prefect 2.x)
 pydantic==1.10.21
+
+# Monitoring — Prometheus Pushgateway
+prometheus-client==0.21.1

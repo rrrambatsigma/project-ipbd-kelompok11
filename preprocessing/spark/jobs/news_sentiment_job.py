@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from loguru import logger
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
 
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql import functions as F
@@ -53,6 +54,37 @@ def _send_telegram(message: str) -> None:
         )
     except Exception as e:
         logger.warning(f"Telegram gagal: {e}")
+
+
+PUSHGATEWAY_URL = "http://pushgateway:9091"
+
+
+def _push_metrics(load_count: int, final_count: int, duration: int, filter_stats: dict):
+    registry = CollectorRegistry()
+
+    Gauge("preprocessing_articles_total", "Total input articles", registry=registry).set(load_count)
+    Gauge("preprocessing_articles_passed", "Articles passed all filters", registry=registry).set(final_count)
+    Gauge("preprocessing_duration_seconds", "Pipeline duration", registry=registry).set(duration)
+    Gauge("preprocessing_pass_rate", "Pass rate percentage", registry=registry).set(
+        final_count / max(load_count, 1) * 100
+    )
+
+    g_before = Gauge(f"preprocessing_filter_before", "Before filter", ["stage"], registry=registry)
+    g_after = Gauge(f"preprocessing_filter_after", "After filter", ["stage"], registry=registry)
+    g_removed = Gauge(f"preprocessing_filter_removed", "Removed by filter", ["stage"], registry=registry)
+
+    for stage, stats in filter_stats.items():
+        if stage == "LOAD":
+            continue
+        g_before.labels(stage=stage).set(stats["before"])
+        g_after.labels(stage=stage).set(stats["after"])
+        g_removed.labels(stage=stage).set(stats["removed"])
+
+    try:
+        push_to_gateway(PUSHGATEWAY_URL, job="preprocessing", registry=registry)
+        logger.info(f"[Metrics] Pushed to Pushgateway ({PUSHGATEWAY_URL})")
+    except Exception as e:
+        logger.warning(f"[Metrics] Gagal push ke Pushgateway: {e}")
 
 
 def _log_filter_stage(stage: str, before: int, after: int, detail: str = ""):
@@ -581,6 +613,9 @@ def run_sentiment_pipeline(use_raw: bool = False, skip_fuzzy: bool = True):
                 if k != "LOAD"
             )
         )
+
+        # ── Push metrics ────────────────────────────
+        _push_metrics(load_count, final_count, duration, FILTER_STATS)
 
     except Exception as e:
         logger.error(f"Pipeline GAGAL: {e}")

@@ -40,6 +40,8 @@ services:
       MINIO_ENDPOINT: ${MINIO_ENDPOINT}
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      TELEGRAM_BOT_TOKEN_MODELLING: ${TELEGRAM_BOT_TOKEN_MODELLING:-8883638359:AAF2Wi3RVXwqtpkVZeeVOa42MAtdeOcP27I}
+      TELEGRAM_CHAT_ID_MODELLING: ${TELEGRAM_CHAT_ID_MODELLING:-5974165452}
       PREFECT_API_URL: http://prefect-server:4200/api
       TZ: Asia/Jakarta
     env_file:
@@ -56,6 +58,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 120s
+
+  serving:
+    build:
+      context: ../serving
+      dockerfile: Dockerfile
+    container_name: serving-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    networks:
+      - ingestion-net
 
 volumes:
   spark-logs:

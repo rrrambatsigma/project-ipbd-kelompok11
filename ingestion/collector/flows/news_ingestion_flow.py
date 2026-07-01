@@ -19,6 +19,7 @@ Output: Raw JSON → MinIO bucket 'news-raw'
 import hashlib
 import os
 import sys
+import time
 from datetime import datetime, timezone
 
 _FLOWS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -37,6 +38,7 @@ from scrapers.gdelt_scraper import scrape_gdelt
 from scrapers.newsapi_scraper import scrape_newsapi
 from storage.minio_client import MinIOClient
 from utils.telegram_alert import alert_batch_success, alert_batch_failed
+from utils.metrics import push_metrics
 
 
 # ═══════════════════════════════════════════
@@ -245,6 +247,7 @@ def euro_news_batch_flow(
         lookback_hours = LOOKBACK_PER_SESSION.get(session, 4)
 
     batch_start = datetime.now(timezone.utc).isoformat()
+    _start_time = time.time()
     logger.info(
         f"[{session.upper()}] Flow dimulai: {batch_start} | lookback: {lookback_hours}h"
     )
@@ -290,6 +293,12 @@ def euro_news_batch_flow(
             alert_batch_failed(session, f"PARTIAL — {summary['total_failed']} artikel gagal")
     except Exception as e:
         logger.warning(f"Alert Telegram gagal (non-fatal): {e}")
+
+    try:
+        elapsed = time.time() - _start_time
+        push_metrics(session=session, summary=summary, duration_seconds=elapsed)
+    except Exception as e:
+        logger.warning(f"Push metrics gagal (non-fatal): {e}")
 
     return summary
 
