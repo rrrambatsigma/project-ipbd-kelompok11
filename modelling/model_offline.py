@@ -96,9 +96,40 @@ SENTIMENT_FEATURES = [
 FEATURE_COLS = KURS_FEATURES + SENTIMENT_FEATURES  # 24 total
 
 
+# ── 0. Ensure schema — tambah kolom keyword kalau belum ada ──────────────
+
+def ensure_schema():
+    """Tambah kolom keyword flags ke sentiment_daily jika belum ada (self-healing)."""
+    conn = psycopg2.connect(**PG_CONFIG)
+    cur = conn.cursor()
+    keyword_cols = [
+        ("has_inflation",        "DOUBLE PRECISION DEFAULT 0"),
+        ("has_interest_rate",    "DOUBLE PRECISION DEFAULT 0"),
+        ("has_ecb",              "DOUBLE PRECISION DEFAULT 0"),
+        ("has_monetary_policy",  "DOUBLE PRECISION DEFAULT 0"),
+        ("has_gdp",              "DOUBLE PRECISION DEFAULT 0"),
+        ("has_recession",        "DOUBLE PRECISION DEFAULT 0"),
+        ("has_growth",           "DOUBLE PRECISION DEFAULT 0"),
+        ("has_trade",            "DOUBLE PRECISION DEFAULT 0"),
+        ("has_forex",            "DOUBLE PRECISION DEFAULT 0"),
+        ("has_currency",         "DOUBLE PRECISION DEFAULT 0"),
+    ]
+    for col_name, col_def in keyword_cols:
+        try:
+            cur.execute(f"ALTER TABLE sentiment_daily ADD COLUMN IF NOT EXISTS {col_name} {col_def}")
+        except Exception as e:
+            conn.rollback()
+            print(f"[WARN] Schema {col_name}: {e}")
+    conn.commit()
+    cur.close()
+    conn.close()
+    print("[INFO] Schema sentiment_daily: OK (keyword columns ensured)")
+
+
 # ── 1. Load data dari PostgreSQL ──────────────────────────────────────────
 
 def load_daily_data(symbol: str = "EURUSD=X") -> pd.DataFrame:
+    ensure_schema()
     conn = psycopg2.connect(**PG_CONFIG)
     df = pd.read_sql(f"""
         SELECT
@@ -308,10 +339,8 @@ def train():
 
     # ── Simpan model ──
     joblib.dump(model, MODEL_PATH)
-    joblib.dump(model, RF_MODEL_PATH)   # copy untuk kompatibilitas serving
     joblib.dump(le,    ENCODER_PATH)
     print(f"\n[INFO] Model     → {MODEL_PATH}")
-    print(f"[INFO] rf_model  → {RF_MODEL_PATH}")
     print(f"[INFO] Encoder   → {ENCODER_PATH}")
 
     # ── Feature importance ──

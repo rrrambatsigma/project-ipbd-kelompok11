@@ -16,7 +16,7 @@ Endpoint yang tersedia:
 Cara jalankan:
   python3 serving/main.py
   atau
-  uvicorn serving.main:app --host 0.0.0.0 --port 8000 --reload
+  uvicorn serving.main:app --host 0.0.0.0 --port 8002 --reload
 """
 
 import sys
@@ -29,6 +29,7 @@ from typing import Optional
 import psycopg2
 import psycopg2.extras
 from datetime import datetime, date
+import numpy as np
 import joblib
 
 app = FastAPI(
@@ -57,8 +58,9 @@ PG_CONFIG = {
     "password": "kursadmin"
 }
 
-MODEL_PATH   = os.path.join(os.path.dirname(__file__), "../modelling/rf_model.pkl")
-ENCODER_PATH = os.path.join(os.path.dirname(__file__), "../modelling/label_encoder.pkl")
+RF_MODEL_PATH   = os.path.join(os.path.dirname(__file__), "../modelling/rf_model.pkl")
+XGB_MODEL_PATH  = os.path.join(os.path.dirname(__file__), "../modelling/xgb_baseline.pkl")
+ENCODER_PATH    = os.path.join(os.path.dirname(__file__), "../modelling/label_encoder.pkl")
 
 
 def get_db():
@@ -82,6 +84,7 @@ def root():
             "/market/signals",
             "/market/signals/latest",
             "/predict/today",
+            "/predict/today/xgb",
             "/stats/summary",
             "/docs"
         ]
@@ -256,6 +259,7 @@ def market_signals_latest():
             cur.execute("""
                 SELECT *
                 FROM v_market_signals
+                ORDER BY trade_date DESC
                 LIMIT 1
             """)
             row = cur.fetchone()
@@ -287,31 +291,30 @@ def market_signals_latest():
 @app.get("/predict/today", tags=["Prediksi"])
 def predict_today():
     """
-    Prediksi arah EUR/USD hari berikutnya menggunakan Random Forest.
+    Prediksi arah EUR/USD hari berikutnya menggunakan Random Forest (model_kurs).
     Output: label (menguat/melemah/stabil) + probabilitas.
     """
-    if not os.path.exists(MODEL_PATH):
+    if not os.path.exists(RF_MODEL_PATH):
         raise HTTPException(
             status_code=503,
-            detail="Model belum tersedia. Jalankan: python3 modelling/model_kurs.py --mode train"
+            detail="RF Model belum tersedia. Jalankan: python3 modelling/model_kurs.py --mode train"
         )
 
     try:
         import pandas as pd
-        import numpy as np
 
-        model = joblib.load(MODEL_PATH)
+        model = joblib.load(RF_MODEL_PATH)
         le    = joblib.load(ENCODER_PATH)
 
         conn = get_db()
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT
-                    trade_date,
-                    COALESCE(price_change_pct, 0)  AS kurs_change_pct,
-                    COALESCE(volatility, 0)         AS kurs_volatility,
-                    COALESCE(ma5, 0)                AS kurs_ma5,
-                    COALESCE(ma10, 0)               AS kurs_ma10,
+                    k.trade_date,
+                    COALESCE(k.price_change_pct, 0)  AS kurs_change_pct,
+                    COALESCE(k.volatility, 0)         AS kurs_volatility,
+                    COALESCE(k.ma5, 0)                AS kurs_ma5,
+                    COALESCE(k.ma10, 0)               AS kurs_ma10,
                     0 AS wti_change_pct,
                     0 AS brent_change_pct,
                     0 AS gold_change_pct,
@@ -322,20 +325,22 @@ def predict_today():
                     0 AS negative_count,
                     0 AS total_news,
                     0 AS sentiment_volatility
-                FROM kurs_daily
-                WHERE symbol = 'EURUSD=X'
-                ORDER BY trade_date DESC
-                LIMIT 3
+                FROM kurs_daily k
+                WHERE k.symbol = 'EURUSD=X'
+                ORDER BY k.trade_date DESC
+                LIMIT 5
             """)
             rows = cur.fetchall()
         conn.close()
 
         if not rows:
             raise HTTPException(status_code=404, detail="Belum ada data kurs harian.")
+        if len(rows) < 3:
+            raise HTTPException(status_code=400, detail="Data kurs harian minimal 3 hari dibutuhkan untuk lag features.")
 
         latest = dict(rows[0])
-        prev1  = dict(rows[1]) if len(rows) > 1 else latest
-        prev2  = dict(rows[2]) if len(rows) > 2 else latest
+        prev1  = dict(rows[1])
+        prev2  = dict(rows[2])
 
         features = {
             "kurs_change_pct":        latest["kurs_change_pct"],
@@ -367,6 +372,7 @@ def predict_today():
 
         return {
             "based_on_date":  str(latest["trade_date"]),
+            "model":          "RandomForest (model_kurs.py)",
             "prediction":     pred_label,
             "emoji":          label_emoji,
             "confidence":     round(float(max(pred_proba)) * 100, 2),
@@ -380,6 +386,130 @@ def predict_today():
                 "kurs_ma10":       latest["kurs_ma10"],
                 "kurs_volatility": latest["kurs_volatility"],
             }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/predict/today/xgb", tags=["Prediksi"])
+def predict_today_xgb():
+    """
+    Prediksi arah EUR/USD hari berikutnya menggunakan XGBoost (model_offline, 24 fitur).
+    Output: label (menguat/melemah/stabil) + probabilitas.
+    """
+    if not os.path.exists(XGB_MODEL_PATH):
+        raise HTTPException(
+            status_code=503,
+            detail="XGBoost Model belum tersedia. Jalankan: python3 modelling/model_offline.py"
+        )
+
+    try:
+        import pandas as pd
+
+        model = joblib.load(XGB_MODEL_PATH)
+        le    = joblib.load(ENCODER_PATH)
+
+        conn = get_db()
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    k.trade_date,
+                    k.open_price, k.high_price, k.low_price, k.close_price,
+                    COALESCE(k.price_change_pct, 0) AS price_change_pct,
+                    COALESCE(k.volatility, 0)        AS volatility,
+                    COALESCE(k.ma5, 0)               AS ma5,
+                    COALESCE(k.ma10, 0)              AS ma10,
+                    COALESCE(s.avg_sentiment,        0) AS avg_sentiment,
+                    COALESCE(s.sentiment_volatility, 0) AS sentiment_volatility,
+                    COALESCE(s.positive_count,       0) AS positive_count,
+                    COALESCE(s.negative_count,       0) AS negative_count,
+                    COALESCE(s.neutral_count,        0) AS neutral_count,
+                    COALESCE(s.total_news,           0) AS total_news,
+                    COALESCE(s.has_ecb,              0) AS has_ecb,
+                    COALESCE(s.has_interest_rate,    0) AS has_interest_rate,
+                    COALESCE(s.has_monetary_policy,  0) AS has_monetary_policy
+                FROM kurs_daily k
+                LEFT JOIN sentiment_daily s ON s.trade_date = k.trade_date
+                WHERE k.symbol = 'EURUSD=X'
+                  AND k.open_price IS NOT NULL
+                  AND k.close_price IS NOT NULL
+                ORDER BY k.trade_date DESC
+                LIMIT 7
+            """)
+            rows = cur.fetchall()
+        conn.close()
+
+        if not rows:
+            raise HTTPException(status_code=404, detail="Belum ada data kurs harian.")
+        if len(rows) < 6:
+            raise HTTPException(status_code=400, detail="Data kurs harian minimal 6 hari dibutuhkan untuk lag & rolling features.")
+
+        df = pd.DataFrame([dict(r) for r in rows])
+        df = df.sort_values("trade_date").reset_index(drop=True)
+
+        # Feature engineering (sama dengan model_offline.py)
+        df["high_low_range"]   = df["high_price"] - df["low_price"]
+        df["close_vs_open"]    = df["close_price"] - df["open_price"]
+        df["close_vs_ma5"]     = df["close_price"] - df["ma5"]
+        df["close_vs_ma10"]    = df["close_price"] - df["ma10"]
+        df["ma5_vs_ma10"]      = df["ma5"] - df["ma10"]
+
+        df["lag1_change_pct"]  = df["price_change_pct"].shift(1)
+        df["lag2_change_pct"]  = df["price_change_pct"].shift(2)
+        df["lag3_change_pct"]  = df["price_change_pct"].shift(3)
+        df["lag1_volatility"]  = df["volatility"].shift(1)
+
+        df["rolling3_avg_change"] = df["price_change_pct"].rolling(3).mean()
+        df["rolling5_avg_change"] = df["price_change_pct"].rolling(5).mean()
+        df["rolling3_volatility"] = df["volatility"].rolling(3).mean()
+        df["momentum_5d"]         = (df["close_price"] / df["close_price"].shift(5) - 1) * 100
+
+        df["sentiment_lag1"] = df["avg_sentiment"].shift(1)
+        df["sentiment_lag2"] = df["avg_sentiment"].shift(2)
+
+        df["positive_ratio"] = np.where(
+            df["total_news"] > 0,
+            df["positive_count"] / df["total_news"], 0.0
+        )
+        df["negative_ratio"] = np.where(
+            df["total_news"] > 0,
+            df["negative_count"] / df["total_news"], 0.0
+        )
+
+        XGB_FEATURES = [
+            "price_change_pct", "volatility", "high_low_range", "close_vs_open",
+            "close_vs_ma5", "close_vs_ma10", "ma5_vs_ma10",
+            "lag1_change_pct", "lag2_change_pct", "lag3_change_pct",
+            "lag1_volatility", "rolling3_avg_change", "rolling5_avg_change",
+            "rolling3_volatility", "momentum_5d",
+            "avg_sentiment", "sentiment_volatility",
+            "sentiment_lag1", "sentiment_lag2",
+            "has_ecb", "has_interest_rate", "has_monetary_policy",
+            "positive_ratio", "negative_ratio",
+        ]
+
+        latest_row = df.iloc[-1:].copy()
+        X = latest_row[XGB_FEATURES]
+
+        pred_enc   = model.predict(X)[0]
+        pred_proba = model.predict_proba(X)[0]
+        pred_label = le.inverse_transform([pred_enc])[0]
+
+        label_emoji = "📈" if pred_label == "menguat" else "📉" if pred_label == "melemah" else "➡️"
+
+        return {
+            "based_on_date":  str(rows[0]["trade_date"]),
+            "model":          "XGBoost (model_offline.py, 24 features)",
+            "prediction":     pred_label,
+            "emoji":          label_emoji,
+            "confidence":     round(float(max(pred_proba)) * 100, 2),
+            "probabilities": {
+                cls: round(float(prob) * 100, 2)
+                for cls, prob in zip(le.classes_, pred_proba)
+            },
         }
 
     except HTTPException:
@@ -445,7 +575,7 @@ if __name__ == "__main__":
     import uvicorn
     print("="*55)
     print("  IPBD Kelompok 11 — Market Flow API")
-    print("  http://localhost:8000")
-    print("  http://localhost:8000/docs  ← Swagger UI")
+    print("  http://localhost:8002")
+    print("  http://localhost:8002/docs  ← Swagger UI")
     print("="*55)
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8002, reload=True)

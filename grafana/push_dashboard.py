@@ -9,7 +9,25 @@ import requests
 
 GRAFANA = "http://localhost:3001"
 AUTH    = ("admin", "admin123")
-DS_UID  = "PDF5DF95FFA6EAABB"
+
+
+def get_ds_uid() -> str:
+    """Auto-detect UID datasource PostgreSQL dari Grafana API."""
+    try:
+        resp = requests.get(f"{GRAFANA}/api/datasources", auth=AUTH, timeout=5)
+        if resp.status_code == 200:
+            for ds in resp.json():
+                if ds.get("type") == "grafana-postgresql-datasource":
+                    print(f"[INFO] DS_UID auto-detected: {ds['uid']}")
+                    return ds["uid"]
+        print(f"[WARN] Gagal auto-detect DS_UID, pakai fallback.")
+    except Exception as e:
+        print(f"[WARN] Gagal konek Grafana API: {e}")
+    # Fallback — user bisa ganti dengan UID manual
+    return "PDF5DF95FFA6EAABB"
+
+
+DS_UID = get_ds_uid()
 
 
 def ds():
@@ -57,14 +75,14 @@ dashboard["panels"].append({
     "targets": [{
         "datasource": ds(),
         "rawQuery": True,
-        "rawSql": (
-            "SELECT\n"
-            "  trade_date AT TIME ZONE 'UTC' AS time,\n"
-            "  close_price AS \"EUR/USD\"\n"
-            "FROM kurs_daily\n"
-            "WHERE symbol = 'EURUSD=X'\n"
-            "ORDER BY trade_date ASC"
-        ),
+            "rawSql": (
+                "SELECT\n"
+                "  trade_date::timestamp AT TIME ZONE 'UTC' AS time,\n"
+                "  close_price AS \"EUR/USD\"\n"
+                "FROM kurs_daily\n"
+                "WHERE symbol = 'EURUSD=X'\n"
+                "ORDER BY trade_date ASC"
+            ),
         "format": "time_series",
         "refId": "A"
     }]
@@ -131,13 +149,13 @@ dashboard["panels"].append({
     "targets": [{
         "datasource": ds(),
         "rawQuery": True,
-        "rawSql": (
-            "SELECT\n"
-            "  trade_date AT TIME ZONE 'UTC' AS time,\n"
-            "  avg_sentiment AS \"Net Sentiment\"\n"
-            "FROM sentiment_daily\n"
-            "ORDER BY trade_date ASC"
-        ),
+            "rawSql": (
+                "SELECT\n"
+                "  trade_date::timestamp AT TIME ZONE 'UTC' AS time,\n"
+                "  avg_sentiment AS \"Net Sentiment\"\n"
+                "FROM sentiment_daily\n"
+                "ORDER BY trade_date ASC"
+            ),
         "format": "time_series",
         "refId": "A"
     }]
@@ -166,14 +184,14 @@ dashboard["panels"].append({
     "targets": [{
         "datasource": ds(),
         "rawQuery": True,
-        "rawSql": (
-            "SELECT\n"
-            "  trade_date AT TIME ZONE 'UTC' AS time,\n"
-            "  total_news AS \"Artikel\"\n"
-            "FROM sentiment_daily\n"
-            "WHERE total_news > 0\n"
-            "ORDER BY trade_date ASC"
-        ),
+            "rawSql": (
+                "SELECT\n"
+                "  trade_date::timestamp AT TIME ZONE 'UTC' AS time,\n"
+                "  total_news AS \"Artikel\"\n"
+                "FROM sentiment_daily\n"
+                "WHERE total_news > 0\n"
+                "ORDER BY trade_date ASC"
+            ),
         "format": "time_series",
         "refId": "A"
     }]
@@ -293,7 +311,6 @@ for sid, title, sql, color, xpos in stat_panels:
 payload = {
     "dashboard": dashboard,
     "overwrite": True,
-    "folderUid": "afqofrq7mzjlsc",
     "message":   "Fix query: AT TIME ZONE UTC untuk time series"
 }
 

@@ -28,8 +28,11 @@ for attempt in range(1, 6):
         print(f"[INFO] Coba lagi dalam 5 detik...")
         time.sleep(5)
 
-TOPIC_NAME  = 'kurs_eur_stream'
-tick_count  = 0   # hitung total tick yang masuk
+TOPIC_NAME   = 'kurs_eur_stream'
+tick_count   = 0
+POLL_INTERVAL = 30  # detik antara setiap polling
+TICKERS      = ["EURUSD=X", "EURIDR=X", "BTC-USD", "GLD"]
+last_seen    = {}   # ticker -> harga terakhir yg sudah dikirim
 
 def kirim_ke_kafka(message):
     global tick_count
@@ -53,8 +56,6 @@ def kirim_ke_kafka(message):
             waktu_lokal = time.strftime('%H:%M:%S', time.localtime(int(waktu_ms) / 1000))
             print(f"[{waktu_lokal}] Data berhasil di-ingest ke Kafka -> {payload}")
 
-            # Kirim notifikasi Telegram setiap tick EURUSD=X
-            # (cooldown 30 detik di notifier, jadi tidak spam)
             if ticker == "EURUSD=X":
                 notify_ingestion(
                     symbol=ticker,
@@ -67,13 +68,38 @@ def kirim_ke_kafka(message):
             print(f"[ERROR] Gagal mengirim data ke Kafka: {e}")
             notify_error("streaming.py", str(e))
 
-print(f"[INFO] Membuka WebSocket yfinance untuk ticker EUR...")
-print("[INFO] Menunggu data mengalir dari pasar global. Tekan Ctrl+C untuk berhenti.\n")
+
+def poll_ticker(ticker: str):
+    """Fetch harga terbaru dari yfinance (1-menit candle) dan kirim ke Kafka jika berubah."""
+    global last_seen
+    try:
+        data = yf.Ticker(ticker).history(period="1d", interval="1m")
+        if data.empty:
+            return
+
+        latest   = data.iloc[-1]
+        price    = float(latest["Close"])
+        ts_ms    = int(latest.name.timestamp() * 1000)
+
+        last     = last_seen.get(ticker)
+        # Kirim jika harga berbeda (minimal 0.0001 dari sebelumnya)
+        if last is None or abs(last - price) > 1e-6:
+            last_seen[ticker] = price
+            msg = {"id": ticker, "price": price, "time": ts_ms}
+            kirim_ke_kafka(msg)
+    except Exception as e:
+        print(f"[WARN] Gagal fetch {ticker}: {e}")
+
+
+print(f"[INFO] Polling harga dari yfinance untuk ticker: {TICKERS}")
+print(f"[INFO] Interval: {POLL_INTERVAL} detik. Tekan Ctrl+C untuk berhenti.\n")
 
 try:
-    with yf.WebSocket() as ws:
-        ws.subscribe(["EURUSD=X", "EURIDR=X", "BTC-USD", "GLD"])
-        ws.listen(kirim_ke_kafka)
+    while True:
+        for ticker in TICKERS:
+            poll_ticker(ticker)
+        time.sleep(POLL_INTERVAL)
+
 except KeyboardInterrupt:
     print("\n[INFO] Streaming dihentikan oleh pengguna.")
     notify_shutdown("streaming.py", {"total_tick": tick_count})

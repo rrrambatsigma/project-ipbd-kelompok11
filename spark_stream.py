@@ -61,7 +61,7 @@ STABLE_THRESHOLD = 0.05   # 0.05%
 
 # ── Konfigurasi MinIO (S3-compatible) ─────────────────────────────────────
 MINIO_CONFIG = {
-    "endpoint_url":          "http://localhost:9000",
+    "endpoint_url":          "http://localhost:9005",
     "aws_access_key_id":     "minioadmin",
     "aws_secret_access_key": "minioadmin",
 }
@@ -205,8 +205,56 @@ def init_tables(conn):
             );
         """)
 
-        # ── Drop view lama dulu sebelum recreate ─────────────────────
-        cur.execute("DROP VIEW IF EXISTS v_market_signals;")
+        # ── Bikin dummy tabel Rafah & Rambat (CREATE IF NOT EXISTS — aman dijalankan ulang) ──
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS commodity_daily (
+                trade_date       DATE             NOT NULL UNIQUE,
+                wti_open         DOUBLE PRECISION,
+                wti_close        DOUBLE PRECISION,
+                wti_change_pct   DOUBLE PRECISION,
+                wti_ma5          DOUBLE PRECISION,
+                brent_open       DOUBLE PRECISION,
+                brent_close      DOUBLE PRECISION,
+                brent_change_pct DOUBLE PRECISION,
+                brent_ma5        DOUBLE PRECISION,
+                gold_open        DOUBLE PRECISION,
+                gold_close       DOUBLE PRECISION,
+                gold_change_pct  DOUBLE PRECISION,
+                gold_ma5         DOUBLE PRECISION,
+                natgas_open      DOUBLE PRECISION,
+                natgas_close     DOUBLE PRECISION,
+                natgas_change_pct DOUBLE PRECISION,
+                natgas_ma5       DOUBLE PRECISION,
+                copper_open      DOUBLE PRECISION,
+                copper_close     DOUBLE PRECISION,
+                copper_change_pct DOUBLE PRECISION,
+                copper_ma5       DOUBLE PRECISION,
+                updated_at       TIMESTAMP        DEFAULT NOW()
+            );
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS sentiment_daily (
+                trade_date           DATE             NOT NULL UNIQUE,
+                avg_sentiment        DOUBLE PRECISION,
+                positive_count       INTEGER,
+                negative_count       INTEGER,
+                neutral_count        INTEGER,
+                total_news           INTEGER,
+                sentiment_volatility DOUBLE PRECISION,
+                dominant_sentiment   VARCHAR(10),
+                has_inflation        DOUBLE PRECISION DEFAULT 0,
+                has_interest_rate    DOUBLE PRECISION DEFAULT 0,
+                has_ecb              DOUBLE PRECISION DEFAULT 0,
+                has_monetary_policy  DOUBLE PRECISION DEFAULT 0,
+                has_gdp              DOUBLE PRECISION DEFAULT 0,
+                has_recession        DOUBLE PRECISION DEFAULT 0,
+                has_growth           DOUBLE PRECISION DEFAULT 0,
+                has_trade            DOUBLE PRECISION DEFAULT 0,
+                has_forex            DOUBLE PRECISION DEFAULT 0,
+                has_currency         DOUBLE PRECISION DEFAULT 0,
+                updated_at           TIMESTAMP        DEFAULT NOW()
+            );
+        """)
 
         # ── View untuk modelling bersama (Jojo + Rafah + Rambat) ─────
         # View ini menggabungkan kurs_daily dengan tabel komoditas & sentimen
@@ -216,29 +264,44 @@ def init_tables(conn):
             CREATE OR REPLACE VIEW v_market_signals AS
             SELECT
                 k.trade_date,
-                k.symbol                          AS kurs_symbol,
+
+                -- [JOJO] Kurs EUR/USD
                 k.open_price                      AS kurs_open,
                 k.close_price                     AS kurs_close,
+                k.high_price                      AS kurs_high,
+                k.low_price                       AS kurs_low,
                 k.price_change_pct                AS kurs_change_pct,
                 k.volatility                      AS kurs_volatility,
                 k.ma5                             AS kurs_ma5,
                 k.ma10                            AS kurs_ma10,
                 k.label                           AS kurs_label,
-                -- kolom dari Rafah (commodity_daily) — NULL jika belum ada
+
+                -- [RAFAH] Komoditas
                 cd.wti_close,
+                cd.wti_change_pct,
+                cd.wti_ma5,
                 cd.brent_close,
+                cd.brent_change_pct,
                 cd.gold_close,
+                cd.gold_change_pct,
+                cd.gold_ma5,
                 cd.natgas_close,
+                cd.natgas_change_pct,
                 cd.copper_close,
-                -- kolom dari Rambat (sentiment_daily) — NULL jika belum ada
+                cd.copper_change_pct,
+
+                -- [RAMBAT] Sentimen
                 sd.avg_sentiment,
                 sd.positive_count,
                 sd.negative_count,
                 sd.total_news,
-                sd.sentiment_volatility
+                sd.sentiment_volatility,
+                sd.dominant_sentiment
+
             FROM kurs_daily k
-            LEFT JOIN commodity_daily  cd ON cd.trade_date  = k.trade_date
-            LEFT JOIN sentiment_daily  sd ON sd.trade_date  = k.trade_date
+            LEFT JOIN commodity_daily  cd ON cd.trade_date = k.trade_date
+            LEFT JOIN sentiment_daily  sd ON sd.trade_date = k.trade_date
+            WHERE k.symbol = 'EURUSD=X'
             ORDER BY k.trade_date DESC;
         """)
 
@@ -367,7 +430,7 @@ def flush_bronze(conn, records: list):
     upload_parquet(parquet_records, BRONZE_SCHEMA, s3_key)
 
 
-def flush_silver(conn, windows: dict) -> list:
+def flush_silver(conn, windows: dict, bronze_count: int = 0) -> list:
     """
     Tulis Silver layer. Return list of silver rows untuk Gold aggregation.
     """
@@ -431,7 +494,7 @@ def flush_silver(conn, windows: dict) -> list:
 
     # Notifikasi Telegram preprocessing
     notify_preprocessing(
-        bronze_count=0,
+        bronze_count=bronze_count,
         silver_count=len(rows),
         windows=rows
     )
@@ -584,8 +647,9 @@ def main():
 
             now = time.time()
             if now - last_flush >= FLUSH_INTERVAL:
+                bronze_count = len(bronze_buffer)
                 flush_bronze(conn, bronze_buffer)
-                silver_rows = flush_silver(conn, silver_windows)
+                silver_rows = flush_silver(conn, silver_windows, bronze_count)
                 flush_gold(conn, silver_rows)
 
                 bronze_buffer  = []

@@ -12,8 +12,8 @@ import threading
 from datetime import datetime
 
 # ── Konfigurasi Bot ───────────────────────────────────────────
-BOT_TOKEN = "8601130724:AAHvGvUBi7Vhg8YVcBoewTYUDe5icUE_kCg"
-CHAT_ID   = "6598491019"
+BOT_TOKEN = "TELEGRAM_BOT_TOKEN"
+CHAT_ID   = "5974165452"
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 # Kirim max 1 notifikasi tiap N detik per kategori (anti spam)

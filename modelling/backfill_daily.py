@@ -48,15 +48,14 @@ def backfill(symbol: str, start: str = "2021-01-01"):
     df.columns = [c.lower() for c in df.columns]
     df = df.rename(columns={"date": "trade_date"})
 
-    # Untuk FX (EURUSD=X), open = close dari yfinance (adjusted)
-    # Gunakan close-to-close return sebagai price_change_pct
+    # Untuk FX (EURUSD=X), open = close kemarin (close-to-close return)
     df = df.sort_values("trade_date").reset_index(drop=True)
     df["price_change"]     = df["close"].diff()
     df["price_change_pct"] = (df["close"].pct_change() * 100).round(4)
     df["open_price_adj"]   = df["close"].shift(1)  # open = close kemarin
 
-    # Drop baris pertama (NaN dari diff)
-    df = df.dropna(subset=["price_change_pct"])
+    # Drop baris pertama (NaN dari diff/shift)
+    df = df.dropna(subset=["price_change_pct", "open_price_adj"])
 
     df["label"]    = df["price_change_pct"].apply(compute_label)
     df["avg_price"] = df["close"].round(6)
@@ -105,7 +104,7 @@ def backfill(symbol: str, start: str = "2021-01-01"):
                     updated_at       = NOW()
             """, (
                 row["trade_date"].date(), symbol,
-                float(row.get("open_price_adj", row["open"])),
+                float(row["open_price_adj"]),
                 float(row["high"]),
                 float(row["low"]),
                 float(row["close"]),
