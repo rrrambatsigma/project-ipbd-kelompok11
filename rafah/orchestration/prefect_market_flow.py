@@ -253,6 +253,11 @@ def send_success_and_event_alerts(dq_report):
     main_driver = signal.get("main_driver") or "-"
     main_driver_corr = signal.get("main_driver_correlation")
 
+    try:
+        main_driver_corr_float = float(main_driver_corr)
+    except Exception:
+        main_driver_corr_float = 0.0
+
     latest_date = signal.get("date") or report.get("latest_prediction", {}).get("date", "-")
 
     friendly = friendly_driver(main_driver)
@@ -264,7 +269,7 @@ def send_success_and_event_alerts(dq_report):
         f"Predicted Change: <b>{predicted_change_pct:.4f}%</b>\n"
         f"Confidence: <b>{confidence}%</b>\n\n"
         f"Main Driver: <b>{friendly}</b>\n"
-        f"Correlation: <b>{float(main_driver_corr):.4f}</b>\n\n"
+        f"Correlation: <b>{main_driver_corr_float:.4f}</b>\n\n"
         f"DQ Status: <b>{dq_report.get('status')}</b>\n"
         f"Rows Joined: <b>{report.get('rows_joined', '-')}</b>\n"
         "Dashboard output refreshed."
@@ -295,7 +300,7 @@ def send_success_and_event_alerts(dq_report):
             "🔁 <b>Main Driver Changed</b>\n\n"
             f"Previous: <b>{friendly_driver(previous_driver)}</b>\n"
             f"Current: <b>{friendly}</b>\n\n"
-            f"Correlation: <b>{float(main_driver_corr):.4f}</b>"
+            f"Correlation: <b>{main_driver_corr_float:.4f}</b>"
         )
         send_telegram(msg)
         write_audit("WARNING", "main_driver_changed_alert_sent", {

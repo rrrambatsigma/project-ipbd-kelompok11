@@ -173,7 +173,7 @@ function BusinessMetric({ icon, label, value, sub, tone = "" }) {
   );
 }
 
-export default function BusinessInsight() {
+export default function BusinessInsight({ refreshKey = 0 }) {
   const [state, setState] = useState({
     loading: true,
     error: null,
@@ -236,7 +236,7 @@ export default function BusinessInsight() {
     }
 
     load();
-  }, []);
+  }, [refreshKey]);
 
   const latestKurs = state.kurs.at(-1);
   const latestNews = state.news.at(-1);

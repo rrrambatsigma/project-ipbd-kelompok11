@@ -473,7 +473,7 @@ export default function App() {
       </nav>
 
       {view === "business" ? (
-        <BusinessInsight />
+        <BusinessInsight refreshKey={lastRefresh?.getTime() || 0} />
       ) : (
         <>
 

@@ -2,6 +2,7 @@ import os
 import json
 from pathlib import Path
 from datetime import datetime
+from urllib.parse import quote
 
 import requests
 import pandas as pd
@@ -149,7 +150,7 @@ def load_commodity():
     all_rows = []
 
     for symbol in symbols:
-        rows = get_json(f"{COMMODITY_API}/commodity/daily?symbol={symbol}&limit=500")
+        rows = get_json(f"{COMMODITY_API}/commodity/daily?symbol={quote(symbol, safe='')}&limit=500")
         all_rows.extend(rows)
 
     df = pd.DataFrame(all_rows)
@@ -303,6 +304,40 @@ def main():
 
     else:
         model_metrics["model_type"] = "correlation_only"
+
+        empty_pred = pd.DataFrame(columns=[
+            "date",
+            "actual_change_pct",
+            "predicted_change_pct",
+            "actual_direction",
+            "predicted_direction",
+            "direction_correct",
+            "confidence",
+        ])
+        empty_pred.to_csv(prediction_path, index=False)
+
+        pd.DataFrame(columns=["feature", "importance"]).to_csv(importance_path, index=False)
+
+        driver_corr = corr.drop(labels=[target_col], errors="ignore")
+        main_driver = driver_corr.index[0] if len(driver_corr) else "-"
+        main_driver_corr = float(driver_corr.iloc[0]) if len(driver_corr) else 0.0
+        latest_date = df["date"].iloc[-1] if len(df) else None
+
+        fallback_signal = {
+            "created_at": datetime.now().isoformat(),
+            "date": latest_date,
+            "predicted_direction": "stable",
+            "predicted_change_pct": 0.0,
+            "actual_change_pct": None,
+            "confidence": 0,
+            "main_driver": main_driver,
+            "main_driver_correlation": main_driver_corr,
+        }
+
+        model_metrics["latest_prediction"] = fallback_signal
+
+        with open(business_signal_path, "w") as f:
+            json.dump(fallback_signal, f, indent=2)
 
     with open(report_path, "w") as f:
         json.dump(model_metrics, f, indent=2)

@@ -35,3 +35,5 @@ requests==2.34.2
 python-dateutil==2.9.0.post0
 pytz==2026.2
 botocore==1.43.37
+python-dotenv
+prefect
