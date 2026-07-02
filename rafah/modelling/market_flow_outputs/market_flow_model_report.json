@@ -1,5 +1,5 @@
 {
-  "created_at": "2026-07-02T14:23:56.250399",
+  "created_at": "2026-07-02T18:36:45.137923",
   "rows_joined": 30,
   "features": [
     "positive_count",
@@ -22,29 +22,39 @@
   "top_correlation": {
     "kurs_change_pct": 1.0,
     "change_pct_SIF": 0.5049747878182785,
+    "avg_pos_prob": 0.2721221167086826,
     "change_pct_BTC_USD": 0.17144178431404128,
+    "volatility_BTC_USD": -0.16871712037828795,
     "volatility_GLD": 0.12639567680981206,
     "volatility_SIF": 0.11570993805816517,
-    "avg_pos_prob": 0.09931899172715274,
     "close_SIF": 0.06924217910831046,
     "close_BTC_USD": 0.06873785126329439,
-    "change_pct_GLD": 0.06546723538649923,
-    "avg_neg_prob": 0.028534001306438406
+    "change_pct_GLD": 0.06546723538649923
   },
   "model_type": "RandomForestRegressor",
-  "r2": -0.28484871710445003,
-  "mae": 0.20828798050595237,
-  "note": "Model regresi sederhana untuk membaca pengaruh relatif fitur X terhadap perubahan kurs.",
+  "test_rows": 8,
+  "r2": -0.040258390605841576,
+  "mae": 0.18961767331349225,
+  "direction_accuracy": 0.375,
+  "latest_prediction": {
+    "date": "2026-07-02",
+    "actual_change_pct": 0.0,
+    "predicted_change_pct": -0.192925436507936,
+    "actual_direction": "stable",
+    "predicted_direction": "weakening",
+    "direction_correct": false,
+    "confidence": 71.0
+  },
   "top_feature_importance": {
-    "volatility_GLD": 0.18350570711030245,
-    "change_pct_SIF": 0.170809350647054,
-    "close_BTC_USD": 0.16134317444641566,
-    "change_pct_BTC_USD": 0.0939201687284539,
-    "avg_pos_prob": 0.0675666983906655,
-    "volatility_BTC_USD": 0.0638878376036082,
-    "close_GLD": 0.059864455580911136,
-    "change_pct_GLD": 0.04743696510286611,
-    "avg_neg_prob": 0.04710068266783793,
-    "volatility_SIF": 0.04538599558198784
+    "change_pct_SIF": 0.17820600309979792,
+    "volatility_GLD": 0.1714003128934495,
+    "close_BTC_USD": 0.17069401559563255,
+    "change_pct_BTC_USD": 0.1036595590801726,
+    "close_GLD": 0.05770642298728969,
+    "volatility_BTC_USD": 0.05669591654576771,
+    "avg_pos_prob": 0.055957922865061786,
+    "avg_neg_prob": 0.053304610308349015,
+    "change_pct_GLD": 0.04436384172927169,
+    "volatility_SIF": 0.04211657953288757
   }
 }

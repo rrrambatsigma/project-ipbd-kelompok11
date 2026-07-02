@@ -1,0 +1,9 @@
+date,actual_change_pct,predicted_change_pct,actual_direction,predicted_direction,direction_correct,confidence
+2026-06-23,-0.3108,-0.28465935039682444,weakening,weakening,True,77.0
+2026-06-24,-0.4165,-0.32672284999999873,weakening,weakening,True,79.0
+2026-06-25,-0.2225,-0.23738875277777738,weakening,weakening,True,73.0
+2026-06-26,0.0659,-0.23211128055555533,strengthening,weakening,False,73.0
+2026-06-29,0.2106,-0.11132412261904785,strengthening,weakening,False,65.0
+2026-06-30,0.3198,-0.15200980595238098,strengthening,weakening,False,68.0
+2026-07-01,-0.0765,0.024964188492063485,weakening,stable,False,60.0
+2026-07-02,0.0,-0.192925436507936,stable,weakening,False,71.0

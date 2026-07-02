@@ -7,7 +7,7 @@ import requests
 import pandas as pd
 from dotenv import load_dotenv
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error, accuracy_score
 from sklearn.model_selection import train_test_split
 
 
@@ -29,13 +29,15 @@ def get_json(url):
     r = requests.get(url, timeout=45)
     r.raise_for_status()
     data = r.json()
-
     if isinstance(data, dict):
         return data.get("data", data)
     return data
 
 
 def send_telegram(text):
+    if os.getenv("SKIP_MODEL_TELEGRAM", "").lower() in ("1", "true", "yes"):
+        print("[INFO] Model Telegram skipped because Prefect handles alerts.")
+        return
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("[WARN] Telegram token/chat id kosong. Skip notification.")
         return
@@ -52,6 +54,20 @@ def send_telegram(text):
         print("[OK] Telegram notification sent.")
     except Exception as e:
         print(f"[WARN] Telegram failed: {e}")
+
+
+def direction_label(value, threshold=0.05):
+    value = float(value)
+    if value > threshold:
+        return "strengthening"
+    if value < -threshold:
+        return "weakening"
+    return "stable"
+
+
+def confidence_score(predicted_change_pct):
+    strength = abs(float(predicted_change_pct))
+    return round(max(55, min(92, 58 + strength * 65)), 0)
 
 
 def load_kurs():
@@ -89,9 +105,9 @@ def load_news():
         else "date" if "date" in df.columns
         else "trade_date"
     )
+
     df["date"] = pd.to_datetime(df[date_col]).dt.date.astype(str)
 
-    # Support several possible column naming styles from News API.
     if "positif" in df.columns and "positive_count" not in df.columns:
         df["positive_count"] = df["positif"]
     if "negatif" in df.columns and "negative_count" not in df.columns:
@@ -129,7 +145,6 @@ def load_news():
 
 
 def load_commodity():
-    # Commodity API max limit is 500, so fetch each ticker separately.
     symbols = ["GLD", "BTC-USD", "SI=F"]
     all_rows = []
 
@@ -164,7 +179,7 @@ def load_commodity():
 
 def main():
     print("=" * 70)
-    print("MARKET FLOW CORRELATION MODELLING")
+    print("MARKET FLOW CORRELATION + EUR/USD PREDICTION")
     print("X = News/Sentiment + Commodity")
     print("Y = Kurs EUR/USD change")
     print("=" * 70)
@@ -200,15 +215,22 @@ def main():
         df[feature_cols + [target_col]]
         .corr(numeric_only=True)[target_col]
         .dropna()
-        .sort_values(ascending=False)
     )
+
+    corr = corr.reindex(corr.abs().sort_values(ascending=False).index)
 
     joined_path = OUT_DIR / "market_flow_joined_dataset.csv"
     corr_path = OUT_DIR / "correlation_vs_kurs_change.csv"
     report_path = OUT_DIR / "market_flow_model_report.json"
+    importance_path = OUT_DIR / "feature_importance.csv"
+    prediction_path = OUT_DIR / "model_predictions_daily.csv"
+    business_signal_path = OUT_DIR / "business_latest_signal.json"
 
     df.to_csv(joined_path, index=False)
     corr.to_csv(corr_path, header=["pearson_r"])
+
+    X = df[feature_cols]
+    y = df[target_col]
 
     model_metrics = {
         "created_at": datetime.now().isoformat(),
@@ -218,10 +240,7 @@ def main():
         "top_correlation": corr.head(10).to_dict(),
     }
 
-    if len(df) >= 20 and len(feature_cols) > 0:
-        X = df[feature_cols]
-        y = df[target_col]
-
+    if len(df) >= 12 and len(feature_cols) > 0:
         X_train, X_test, y_train, y_test = train_test_split(
             X,
             y,
@@ -230,7 +249,7 @@ def main():
         )
 
         model = RandomForestRegressor(
-            n_estimators=200,
+            n_estimators=300,
             max_depth=6,
             random_state=42
         )
@@ -238,21 +257,52 @@ def main():
         model.fit(X_train, y_train)
         pred = model.predict(X_test)
 
+        pred_df = pd.DataFrame({
+            "date": df.loc[y_test.index, "date"].values,
+            "actual_change_pct": y_test.values,
+            "predicted_change_pct": pred,
+        })
+
+        pred_df["actual_direction"] = pred_df["actual_change_pct"].apply(direction_label)
+        pred_df["predicted_direction"] = pred_df["predicted_change_pct"].apply(direction_label)
+        pred_df["direction_correct"] = pred_df["actual_direction"] == pred_df["predicted_direction"]
+        pred_df["confidence"] = pred_df["predicted_change_pct"].apply(confidence_score)
+
+        pred_df.to_csv(prediction_path, index=False)
+
+        latest_prediction = pred_df.iloc[-1].to_dict()
+
         model_metrics.update({
             "model_type": "RandomForestRegressor",
+            "test_rows": int(len(pred_df)),
             "r2": float(r2_score(y_test, pred)),
             "mae": float(mean_absolute_error(y_test, pred)),
-            "note": "Model regresi sederhana untuk membaca pengaruh relatif fitur X terhadap perubahan kurs.",
+            "direction_accuracy": float(accuracy_score(pred_df["actual_direction"], pred_df["predicted_direction"])),
+            "latest_prediction": latest_prediction,
         })
 
         importances = pd.Series(model.feature_importances_, index=feature_cols)
         importances = importances.sort_values(ascending=False)
-        importances.to_csv(OUT_DIR / "feature_importance.csv", header=["importance"])
+        importances.to_csv(importance_path, header=["importance"])
 
         model_metrics["top_feature_importance"] = importances.head(10).to_dict()
+
+        business_signal = {
+            "created_at": datetime.now().isoformat(),
+            "date": latest_prediction["date"],
+            "predicted_direction": latest_prediction["predicted_direction"],
+            "predicted_change_pct": latest_prediction["predicted_change_pct"],
+            "actual_change_pct": latest_prediction["actual_change_pct"],
+            "confidence": latest_prediction["confidence"],
+            "main_driver": corr.drop(labels=[target_col], errors="ignore").index[0],
+            "main_driver_correlation": float(corr.drop(labels=[target_col], errors="ignore").iloc[0]),
+        }
+
+        with open(business_signal_path, "w") as f:
+            json.dump(business_signal, f, indent=2)
+
     else:
         model_metrics["model_type"] = "correlation_only"
-        model_metrics["note"] = "Data gabungan kurang dari 20 baris atau fitur kosong. Korelasi tetap dihitung."
 
     with open(report_path, "w") as f:
         json.dump(model_metrics, f, indent=2)
@@ -261,22 +311,29 @@ def main():
     print(f"  {joined_path}")
     print(f"  {corr_path}")
     print(f"  {report_path}")
-    if (OUT_DIR / "feature_importance.csv").exists():
-        print(f"  {OUT_DIR / 'feature_importance.csv'}")
+    if importance_path.exists():
+        print(f"  {importance_path}")
+    if prediction_path.exists():
+        print(f"  {prediction_path}")
+    if business_signal_path.exists():
+        print(f"  {business_signal_path}")
 
     print("\nTop correlation vs kurs_change_pct:")
     print(corr.head(10))
 
-    telegram_msg = (
+    latest = model_metrics.get("latest_prediction", {})
+    msg = (
         "✅ <b>Market Flow Modelling Selesai</b>\n"
         "X: News/Sentiment + Commodity\n"
         "Y: Kurs EUR/USD change\n"
         f"Rows gabungan: {len(df)}\n\n"
+        f"<b>Prediksi terbaru:</b> {latest.get('predicted_direction', '-')}\n"
+        f"Predicted change: {float(latest.get('predicted_change_pct', 0)):.4f}%\n\n"
         "<b>Top Korelasi:</b>\n"
-        + "\n".join([f"- {k}: {v:.4f}" for k, v in corr.head(5).items()])
+        + "\n".join([f"- {k}: {v:.4f}" for k, v in corr.drop(labels=[target_col], errors='ignore').head(5).items()])
     )
 
-    send_telegram(telegram_msg)
+    send_telegram(msg)
 
 
 if __name__ == "__main__":

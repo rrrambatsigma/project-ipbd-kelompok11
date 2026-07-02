@@ -1,25 +1,47 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 import {
-  Activity, AlertTriangle, BarChart3, Bell, Bitcoin, Database,
-  Newspaper, RefreshCw, ShieldCheck, TrendingUp,
+  Activity,
+  AlertTriangle,
+  BarChart3,
+  Bell,
+  Bitcoin,
+  Database,
+  GitCompareArrows,
+  Newspaper,
+  RefreshCw,
+  ShieldCheck,
+  Target,
+  TrendingUp,
 } from "lucide-react";
 import {
   checkApiStatus,
   fetchKursDaily,
-  fetchKursSummary,
   fetchNewsDaily,
   fetchCommodityDaily,
   fetchCommodityLatest,
-  fetchCommoditySummary,
   fetchCommodityPredictions,
   fetchMarketFlowReport,
   fetchMarketFlowCorrelation,
   fetchMarketFlowFeatureImportance,
 } from "./lib/api";
+import BusinessInsight from "./BusinessInsight";
 import "./App.css";
 
 function asNumber(value, fallback = 0) {
@@ -27,34 +49,74 @@ function asNumber(value, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function dateOf(row) {
-  return row.trade_date || row.date || row.window_start || row.event_time || "-";
+function formatNumber(value, digits = 4) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return n.toFixed(digits);
 }
 
-function latestOf(rows) {
-  return Array.isArray(rows) && rows.length ? rows[0] : null;
+function formatPercent(value, digits = 2) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "-";
+  return `${n.toFixed(digits)}%`;
+}
+
+function dateOf(row) {
+  return row.trade_date || row.tanggal || row.date || row.window_start || row.event_time || "-";
+}
+
+function sortByDate(rows) {
+  return [...rows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function parseCsv(text) {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split(",").map((h) => h.trim());
+
+  return lines.slice(1).map((line) => {
+    const parts = line.split(",");
+    const row = {};
+
+    headers.forEach((h, i) => {
+      const raw = parts[i]?.trim();
+      const num = Number(raw);
+      row[h || "feature"] = Number.isFinite(num) && raw !== "" ? num : raw;
+    });
+
+    return row;
+  });
+}
+
+async function fetchJoinedDataset() {
+  try {
+    const res = await fetch(`/market_flow_outputs/market_flow_joined_dataset.csv?t=${Date.now()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { ok: true, data: parseCsv(await res.text()), error: null };
+  } catch (err) {
+    return { ok: false, data: [], error: err.message };
+  }
 }
 
 function normalizeKurs(rows) {
-  return (Array.isArray(rows) ? rows : []).map((r) => ({
+  return sortByDate((Array.isArray(rows) ? rows : []).map((r) => ({
     date: dateOf(r),
     close: asNumber(r.kurs_close ?? r.close ?? r.close_price),
     change_pct: asNumber(r.kurs_change_pct ?? r.change_pct ?? r.price_change_pct),
     label: r.kurs_label ?? r.label ?? "-",
-  })).reverse();
+  })));
 }
 
 function normalizeNews(rows) {
-  return (Array.isArray(rows) ? rows : []).map((r) => {
+  return sortByDate((Array.isArray(rows) ? rows : []).map((r) => {
     const positive = asNumber(r.positive_count ?? r.positif ?? r.positive ?? 0);
     const negative = asNumber(r.negative_count ?? r.negatif ?? r.negative ?? 0);
     const avgPos = asNumber(r.avg_pos_prob ?? r.avg_positive ?? r.avg_pos ?? 0);
     const avgNeg = asNumber(r.avg_neg_prob ?? r.avg_negative ?? r.avg_neg ?? 0);
 
     let net = r.net_sentiment ?? r.avg_compound ?? r.compound ?? r.sentiment;
-    if (net === undefined || net === null) {
-      net = avgPos - avgNeg;
-    }
+    if (net === undefined || net === null) net = avgPos - avgNeg;
 
     return {
       date: dateOf(r),
@@ -65,11 +127,11 @@ function normalizeNews(rows) {
       avg_neg_prob: avgNeg,
       total_news: asNumber(r.total_news ?? r.article_count ?? r.count ?? positive + negative),
     };
-  }).reverse();
+  }));
 }
 
 function normalizeCommodity(rows) {
-  return (Array.isArray(rows) ? rows : []).map((r) => ({
+  return sortByDate((Array.isArray(rows) ? rows : []).map((r) => ({
     date: dateOf(r),
     symbol: r.symbol,
     commodity: r.commodity,
@@ -77,13 +139,71 @@ function normalizeCommodity(rows) {
     change_pct: asNumber(r.change_pct ?? r.price_change_pct),
     label: r.label ?? "-",
     tick_count: asNumber(r.tick_count),
-  })).reverse();
+  })));
 }
 
-function StatusPill({ item }) {
+function aggregateMonthlySentiment(rows) {
+  const map = new Map();
+
+  for (const row of rows) {
+    if (!row.date || row.date === "-") continue;
+    const month = String(row.date).slice(0, 7);
+
+    if (!map.has(month)) {
+      map.set(month, { month, sentiment_sum: 0, total_news: 0, rows: 0 });
+    }
+
+    const item = map.get(month);
+    item.sentiment_sum += row.net_sentiment;
+    item.total_news += row.total_news;
+    item.rows += 1;
+  }
+
+  return Array.from(map.values()).map((r) => ({
+    month: r.month,
+    avg_sentiment: r.rows ? r.sentiment_sum / r.rows : 0,
+    total_news: r.total_news,
+  })).slice(-36);
+}
+
+
+function buildDriverTimeline(rows, driverKey) {
+  if (!driverKey) return [];
+
+  const clean = (Array.isArray(rows) ? rows : [])
+    .map((r) => ({
+      date: r.date,
+      kurs: Number(r.kurs_change_pct),
+      driver: Number(r[driverKey]),
+    }))
+    .filter((r) => Number.isFinite(r.kurs) && Number.isFinite(r.driver));
+
+  if (!clean.length) return [];
+
+  const mean = (arr, key) => arr.reduce((s, r) => s + r[key], 0) / arr.length;
+  const std = (arr, key, m) => {
+    const v = Math.sqrt(arr.reduce((s, r) => s + Math.pow(r[key] - m, 2), 0) / arr.length);
+    return v || 1;
+  };
+
+  const kursMean = mean(clean, "kurs");
+  const driverMean = mean(clean, "driver");
+  const kursStd = std(clean, "kurs", kursMean);
+  const driverStd = std(clean, "driver", driverMean);
+
+  return clean.slice(-45).map((r) => ({
+    date: r.date,
+    kurs_change_pct: r.kurs,
+    driver_value: r.driver,
+    kurs_z: (r.kurs - kursMean) / kursStd,
+    driver_z: (r.driver - driverMean) / driverStd,
+  }));
+}
+
+function ServicePill({ item }) {
   return (
-    <div className={`status-pill ${item.ok ? "online" : "offline"}`}>
-      <span className="dot" />
+    <div className={`service-pill ${item.ok ? "online" : "offline"}`}>
+      <span />
       <div>
         <b>{item.name}</b>
         <small>{item.ok ? "Online" : "Offline"} · {item.baseUrl}</small>
@@ -92,99 +212,106 @@ function StatusPill({ item }) {
   );
 }
 
-function MetricCard({ title, value, subtitle, icon, tone = "blue" }) {
+function KpiCard({ icon, label, value, sub, tone = "blue" }) {
   return (
-    <div className={`metric-card ${tone}`}>
-      <div className="metric-icon">{icon}</div>
+    <div className={`kpi-card ${tone}`}>
+      <div className="kpi-icon">{icon}</div>
       <div>
-        <p>{title}</p>
-        <h2>{value}</h2>
-        {subtitle && <span>{subtitle}</span>}
+        <span>{label}</span>
+        <b>{value}</b>
+        <small>{sub}</small>
       </div>
     </div>
   );
 }
 
-function Panel({ title, subtitle, children, error }) {
+function Panel({ title, eyebrow, children, error, className = "" }) {
   return (
-    <section className="panel">
-      <div className="panel-head">
+    <section className={`panel ${className}`}>
+      <div className="panel-header">
         <div>
+          {eyebrow && <span className="panel-eyebrow">{eyebrow}</span>}
           <h3>{title}</h3>
-          {subtitle && <p>{subtitle}</p>}
         </div>
-        {error && <span className="panel-error"><AlertTriangle size={14} /> {String(error).slice(0, 80)}</span>}
+        {error && (
+          <div className="panel-error">
+            <AlertTriangle size={14} />
+            {String(error).slice(0, 80)}
+          </div>
+        )}
       </div>
       {children}
     </section>
   );
 }
 
-function PredictionBadge({ prediction }) {
-  const value = prediction || "unknown";
-  const cls = value.includes("naik") || value.includes("menguat") ? "up"
-    : value.includes("turun") || value.includes("melemah") ? "down"
-    : "stable";
+function PredictionBadge({ value }) {
+  const text = String(value || "unknown").toLowerCase();
 
-  return <span className={`prediction ${cls}`}>{value}</span>;
+  const cls =
+    text.includes("naik") || text.includes("menguat") || text.includes("up")
+      ? "up"
+      : text.includes("turun") || text.includes("melemah") || text.includes("down")
+        ? "down"
+        : "stable";
+
+  return <span className={`badge ${cls}`}>{value || "-"}</span>;
 }
 
 export default function App() {
-  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState("business");
+  const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState(null);
-  const [apiStatus, setApiStatus] = useState([]);
 
+  const [apiStatus, setApiStatus] = useState([]);
   const [kurs, setKurs] = useState({ ok: true, data: [], error: null });
-  const [kursSummary, setKursSummary] = useState({ ok: true, data: {}, error: null });
   const [news, setNews] = useState({ ok: true, data: [], error: null });
   const [commodity, setCommodity] = useState({ ok: true, data: [], error: null });
   const [commodityLatest, setCommodityLatest] = useState({ ok: true, data: [], error: null });
-  const [commoditySummary, setCommoditySummary] = useState({ ok: true, data: {}, error: null });
   const [predictions, setPredictions] = useState({ ok: true, data: [], error: null });
-  
+
   const [modelReport, setModelReport] = useState({ ok: true, data: {}, error: null });
   const [correlationRows, setCorrelationRows] = useState({ ok: true, data: [], error: null });
   const [featureImportanceRows, setFeatureImportanceRows] = useState({ ok: true, data: [], error: null });
+  const [joinedRows, setJoinedRows] = useState({ ok: true, data: [], error: null });
 
   async function load() {
     setLoading(true);
+
     const [
       statusRes,
       kursRes,
-      kursSummaryRes,
       newsRes,
       commodityRes,
       commodityLatestRes,
-      commoditySummaryRes,
       predictionRes,
       modelReportRes,
       correlationRes,
       featureImportanceRes,
+      joinedRes,
     ] = await Promise.all([
       checkApiStatus(),
       fetchKursDaily(),
-      fetchKursSummary(),
       fetchNewsDaily(),
       fetchCommodityDaily(),
       fetchCommodityLatest(),
-      fetchCommoditySummary(),
       fetchCommodityPredictions(),
       fetchMarketFlowReport(),
       fetchMarketFlowCorrelation(),
       fetchMarketFlowFeatureImportance(),
+      fetchJoinedDataset(),
     ]);
 
     setApiStatus(statusRes);
     setKurs(kursRes);
-    setKursSummary(kursSummaryRes);
     setNews(newsRes);
     setCommodity(commodityRes);
     setCommodityLatest(commodityLatestRes);
-    setCommoditySummary(commoditySummaryRes);
     setPredictions(predictionRes);
     setModelReport(modelReportRes);
     setCorrelationRows(correlationRes);
     setFeatureImportanceRows(featureImportanceRes);
+    setJoinedRows(joinedRes);
     setLastRefresh(new Date());
     setLoading(false);
   }
@@ -200,8 +327,80 @@ export default function App() {
   const commodityRows = useMemo(() => normalizeCommodity(commodity.data), [commodity]);
   const latestCommodityRows = useMemo(() => normalizeCommodity(commodityLatest.data), [commodityLatest]);
 
-  const latestKurs = latestOf([...kursRows].reverse());
-  const latestNews = latestOf([...newsRows].reverse());
+  const latestKurs = kursRows.at(-1);
+  const latestNews = newsRows.at(-1);
+
+  const monthlyNews = useMemo(() => aggregateMonthlySentiment(newsRows), [newsRows]);
+
+  const topDriver = useMemo(() => {
+    return (correlationRows.data || [])
+      .filter((r) => r.feature !== "kurs_change_pct")
+      .filter((r) => Number.isFinite(Number(r.pearson_r)))
+      .sort((a, b) => Math.abs(Number(b.pearson_r)) - Math.abs(Number(a.pearson_r)))[0];
+  }, [correlationRows]);
+
+  const driverType = useMemo(() => {
+    const feature = String(topDriver?.feature || "").toLowerCase();
+
+    if (
+      feature.includes("sentiment") ||
+      feature.includes("positive") ||
+      feature.includes("negative") ||
+      feature.includes("pos_prob") ||
+      feature.includes("neg_prob") ||
+      feature.includes("news") ||
+      feature.includes("article")
+    ) {
+      return "news";
+    }
+
+    if (
+      feature.includes("btc") ||
+      feature.includes("gld") ||
+      feature.includes("sif") ||
+      feature.includes("si=f") ||
+      feature.includes("commodity") ||
+      feature.includes("volatility") ||
+      feature.includes("change_pct") ||
+      feature.includes("close_")
+    ) {
+      return "commodity";
+    }
+
+    if (feature.includes("kurs") || feature.includes("eur")) {
+      return "kurs";
+    }
+
+    return "commodity";
+  }, [topDriver]);
+
+
+  const correlationTop = useMemo(() => {
+    return (correlationRows.data || [])
+      .filter((r) => r.feature !== "kurs_change_pct")
+      .slice(0, 8);
+  }, [correlationRows]);
+
+  const featureTop = useMemo(() => {
+    return (featureImportanceRows.data || []).slice(0, 8);
+  }, [featureImportanceRows]);
+
+  const scatterRows = useMemo(() => {
+    if (!topDriver) return [];
+
+    return (joinedRows.data || [])
+      .map((r) => ({
+        date: r.date,
+        x: Number(r[topDriver.feature]),
+        y: Number(r.kurs_change_pct),
+      }))
+      .filter((r) => Number.isFinite(r.x) && Number.isFinite(r.y));
+  }, [joinedRows, topDriver]);
+
+  const driverTimeline = useMemo(() => {
+    return buildDriverTimeline(joinedRows.data || [], topDriver?.feature);
+  }, [joinedRows, topDriver]);
+
 
   const commodityBySymbol = useMemo(() => {
     const map = {};
@@ -212,170 +411,275 @@ export default function App() {
     return map;
   }, [commodityRows]);
 
-  const indexedCommodityRows = useMemo(() => {
-    const rows = [];
-
-    for (const [symbol, symbolRows] of Object.entries(commodityBySymbol)) {
-      const sorted = [...symbolRows].sort((a, b) => String(a.date).localeCompare(String(b.date)));
-      const base = sorted.find((r) => r.close > 0)?.close || 1;
-
-      for (const row of sorted) {
-        rows.push({
-          ...row,
-          indexed_close: (row.close / base) * 100,
-        });
-      }
-    }
-
-    return rows;
-  }, [commodityBySymbol]);
-
   const indexedBySymbol = useMemo(() => {
     const map = {};
-    for (const row of indexedCommodityRows) {
-      if (!map[row.symbol]) map[row.symbol] = [];
-      map[row.symbol].push(row);
-    }
-    return map;
-  }, [indexedCommodityRows]);
 
-  const commodityLatestGrouped = useMemo(() => {
-    const sourceRows = latestCommodityRows.length ? latestCommodityRows : commodityRows;
+    for (const [symbol, rows] of Object.entries(commodityBySymbol)) {
+      const sorted = sortByDate(rows).slice(-160);
+      const base = sorted.find((r) => r.close > 0)?.close || 1;
+
+      map[symbol] = sorted.map((r) => ({
+        ...r,
+        indexed_close: (r.close / base) * 100,
+      }));
+    }
+
+    return map;
+  }, [commodityBySymbol]);
+
+  const latestCommodityGrouped = useMemo(() => {
+    const source = latestCommodityRows.length ? latestCommodityRows : commodityRows;
     const map = new Map();
 
-    for (const row of [...sourceRows].reverse()) {
-      if (row.symbol && !map.has(row.symbol)) {
-        map.set(row.symbol, row);
-      }
+    for (const row of [...source].reverse()) {
+      if (row.symbol && !map.has(row.symbol)) map.set(row.symbol, row);
     }
 
     return Array.from(map.values());
   }, [latestCommodityRows, commodityRows]);
 
+  const modelR2 = modelReport.data?.r2;
+  const modelNote = Number(modelR2) < 0
+    ? "Exploratory only: data join masih kecil, jadi fokus pada korelasi dan feature importance."
+    : "Model dapat digunakan sebagai indikasi awal hubungan X terhadap Y.";
+
   return (
-    <main className="app-shell">
-      <div className="hero">
+    <main className="page">
+      <header className="hero">
         <div>
-          <span className="eyebrow">IPBD Kelompok 11</span>
-          <h1>Market Flow Intelligence Dashboard</h1>
-          <p>Analisis integrasi kurs EUR/USD, sentimen berita, dan komoditas GLD · BTC-USD · SI=F.</p>
-        </div>
-        <button className="refresh-btn" onClick={load}>
+          <span className="hero-chip">IPBD Kelompok 11</span>
+          <h1>Market Flow Intelligence</h1>
+</div>
+
+        <button className="refresh-button" onClick={load}>
           <RefreshCw size={18} className={loading ? "spin" : ""} />
           Refresh
         </button>
-      </div>
+      </header>
 
-      <section className="status-grid">
-        {apiStatus.map((item) => <StatusPill key={item.name} item={item} />)}
-      </section>
+      <nav className="dashboard-nav">
+        <button
+          className={`nav-tab ${view === "business" ? "active" : ""}`}
+          onClick={() => setView("business")}
+        >
+          Business Insight
+        </button>
+        <button
+          className={`nav-tab ${view === "model" ? "active" : ""}`}
+          onClick={() => setView("model")}
+        >
+          Model Analysis
+        </button>
+      </nav>
 
-      <section className="metric-grid">
-        <MetricCard
-          title="Latest EUR/USD"
-          value={latestKurs ? latestKurs.close.toFixed(4) : "-"}
-          subtitle={latestKurs ? `${latestKurs.change_pct.toFixed(4)}% · ${latestKurs.label}` : "waiting for Kurs API"}
-          icon={<TrendingUp size={22} />}
+      {view === "business" ? (
+        <BusinessInsight />
+      ) : (
+        <>
+
+<section className="kpi-grid">
+        <KpiCard
+          icon={<TrendingUp size={21} />}
+          label="Latest EUR/USD"
+          value={latestKurs ? formatNumber(latestKurs.close, 4) : "-"}
+          sub={latestKurs ? `${formatPercent(latestKurs.change_pct, 4)} · ${latestKurs.label}` : "Kurs API"}
           tone="blue"
         />
-        <MetricCard
-          title="Latest Sentiment"
-          value={latestNews ? latestNews.net_sentiment.toFixed(3) : "-"}
-          subtitle={latestNews ? `positive ${latestNews.positive_count} · negative ${latestNews.negative_count}` : "waiting for News API"}
-          icon={<Newspaper size={22} />}
+
+        <KpiCard
+          icon={<Newspaper size={21} />}
+          label="Latest Sentiment"
+          value={latestNews ? formatNumber(latestNews.net_sentiment, 3) : "-"}
+          sub={latestNews ? `positive ${latestNews.positive_count} · negative ${latestNews.negative_count}` : "News API"}
           tone="green"
         />
-        <MetricCard
-          title="Commodity Rows"
-          value={commodityRows.length || "-"}
-          subtitle={commodity.ok ? "daily commodity records" : "endpoint error"}
-          icon={<Bitcoin size={22} />}
-          tone="orange"
+
+        <KpiCard
+          icon={<GitCompareArrows size={21} />}
+          label="Strongest X Driver"
+          value={topDriver?.feature || "-"}
+          sub={topDriver ? `Pearson r ${formatNumber(topDriver.pearson_r, 4)}` : "Model output"}
+          tone="cyan"
         />
-        <MetricCard
-          title="Monitoring"
-          value={apiStatus.every((x) => x.ok) ? "Healthy" : "Check"}
-          subtitle={lastRefresh ? `last refresh ${lastRefresh.toLocaleTimeString()}` : "not refreshed yet"}
-          icon={<ShieldCheck size={22} />}
+
+        <KpiCard
+          icon={<Target size={21} />}
+          label="Joined Days"
+          value={modelReport.data?.rows_joined ?? "-"}
+          sub="News + Commodity + EUR/USD"
           tone="purple"
         />
       </section>
 
-      <section className="dashboard-grid">
+      <section className="stakeholder-summary">
+        <div className="stakeholder-left">
+          <h2>EUR/USD market flow signal</h2>
+          <p>
+            This view summarizes the current relationship between market drivers and EUR/USD movement.
+          </p>
+
+          <div className="signal-grid">
+            <div className="signal-card primary">
+              <span>Main driver</span>
+              <b>{topDriver?.feature || "-"}</b>
+              <small>Pearson r {topDriver ? formatNumber(topDriver.pearson_r, 4) : "-"}</small>
+            </div>
+
+            <div className="signal-card">
+              <span>Latest EUR/USD</span>
+              <b>{latestKurs ? formatNumber(latestKurs.close, 4) : "-"}</b>
+              <small>{latestKurs ? `${formatPercent(latestKurs.change_pct, 4)} · ${latestKurs.label}` : "No data"}</small>
+            </div>
+
+            <div className="signal-card">
+              <span>Latest sentiment</span>
+              <b>{latestNews ? formatNumber(latestNews.net_sentiment, 3) : "-"}</b>
+              <small>{latestNews ? `+${latestNews.positive_count} / -${latestNews.negative_count}` : "No data"}</small>
+            </div>
+
+</div>
+        </div>
+
+        <div className="stakeholder-chart">
+          <div className="chart-title-row">
+            <div>
+              <h3>Kurs movement vs strongest driver</h3>
+              <p>Both series are normalized so the direction of movement can be compared.</p>
+            </div>
+          </div>
+
+          <ResponsiveContainer width="100%" height={390}>
+            <LineChart data={driverTimeline}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis dataKey="date" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <YAxis tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <Tooltip
+                contentStyle={{ background: "#020617", border: "1px solid #334155" }}
+                formatter={(value) => formatNumber(value, 4)}
+              />
+              <Legend />
+              <Line
+                type="monotone"
+                dataKey="kurs_z"
+                name="EUR/USD movement"
+                stroke="#38bdf8"
+                strokeWidth={2}
+                dot={false}
+              />
+              <Line
+                type="monotone"
+                dataKey="driver_z"
+                name={topDriver?.feature || "Top driver"}
+                stroke="#f97316"
+                strokeWidth={2}
+                dot={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </section>
+
+      <section className="analysis-grid">
+        <Panel title="Which drivers move with EUR/USD?" eyebrow="Driver relationship">
+          <ResponsiveContainer width="100%" height={340}>
+            <BarChart data={correlationTop} layout="vertical" margin={{ left: 120, right: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis type="number" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <YAxis dataKey="feature" type="category" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
+              <Bar dataKey="pearson_r" fill="#38bdf8" radius={[0, 8, 8, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+
+        <Panel title="What does the model rely on?" eyebrow="Feature importance">
+          <ResponsiveContainer width="100%" height={340}>
+            <BarChart data={featureTop} layout="vertical" margin={{ left: 120, right: 20 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis type="number" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <YAxis dataKey="feature" type="category" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
+              <Bar dataKey="importance" fill="#f97316" radius={[0, 8, 8, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      </section>
+
+      <section className="context-grid context-grid-dynamic">
         <Panel
-          title="EUR/USD Daily Trend"
-          subtitle="Jojo module — Kurs API"
+          title="EUR/USD Context"
+          eyebrow="Kurs trend"
           error={kurs.error}
+          className={driverType === "kurs" ? "featured-context" : "supporting-context"}
         >
-          <ResponsiveContainer width="100%" height={310}>
-            <AreaChart data={kursRows}>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={kursRows.slice(-45)}>
               <defs>
-                <linearGradient id="kursGradient" x1="0" x2="0" y1="0" y2="1">
+                <linearGradient id="kursFill" x1="0" x2="0" y1="0" y2="1">
                   <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.55} />
-                  <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.03} />
+                  <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} />
+              <XAxis dataKey="date" tick={{ fill: "#cbd5e1", fontSize: 10 }} />
+              <YAxis tick={{ fill: "#cbd5e1", fontSize: 10 }} />
               <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
-              <Area type="monotone" dataKey="close" stroke="#38bdf8" fill="url(#kursGradient)" strokeWidth={2} />
+              <Area type="monotone" dataKey="close" stroke="#38bdf8" fill="url(#kursFill)" strokeWidth={2} />
             </AreaChart>
           </ResponsiveContainer>
         </Panel>
 
         <Panel
-          title="News Sentiment Trend"
-          subtitle="Rambat module — sentiment daily"
+          title="News Sentiment Context"
+          eyebrow="Monthly average sentiment"
           error={news.error}
+          className={driverType === "news" ? "featured-context" : "supporting-context"}
         >
-          <ResponsiveContainer width="100%" height={310}>
-            <LineChart data={newsRows}>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={monthlyNews}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="date" tick={{ fill: "#94a3b8", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} />
+              <XAxis dataKey="month" tick={{ fill: "#cbd5e1", fontSize: 10 }} />
+              <YAxis tick={{ fill: "#cbd5e1", fontSize: 10 }} />
               <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
-              <Legend />
-              <Line type="monotone" dataKey="net_sentiment" stroke="#22c55e" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="avg_sentiment" stroke="#22c55e" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </Panel>
 
         <Panel
-          title="Commodity Indexed Price Movement"
-          subtitle="Rafah module — normalized index, first value = 100"
+          title="Commodity Context"
+          eyebrow="Indexed movement, base = 100"
           error={commodity.error}
+          className={driverType === "commodity" ? "featured-context" : "supporting-context"}
         >
-          <ResponsiveContainer width="100%" height={330}>
+          <ResponsiveContainer width="100%" height={300}>
             <LineChart>
               <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis dataKey="date" type="category" allowDuplicatedCategory={false} tick={{ fill: "#94a3b8", fontSize: 11 }} />
-              <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} />
+              <XAxis dataKey="date" type="category" allowDuplicatedCategory={false} tick={{ fill: "#cbd5e1", fontSize: 10 }} />
+              <YAxis tick={{ fill: "#cbd5e1", fontSize: 10 }} />
               <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
               <Legend />
-              <Line data={indexedBySymbol["GLD"] || []} type="monotone" dataKey="indexed_close" name="Gold GLD indexed" stroke="#facc15" strokeWidth={2} dot={false} />
-              <Line data={indexedBySymbol["BTC-USD"] || []} type="monotone" dataKey="indexed_close" name="Bitcoin BTC-USD indexed" stroke="#fb923c" strokeWidth={2} dot={false} />
-              <Line data={indexedBySymbol["SI=F"] || []} type="monotone" dataKey="indexed_close" name="Silver SI=F indexed" stroke="#cbd5e1" strokeWidth={2} dot={false} />
+              <Line data={indexedBySymbol["GLD"] || []} type="monotone" dataKey="indexed_close" name="GLD" stroke="#facc15" strokeWidth={2} dot={false} />
+              <Line data={indexedBySymbol["BTC-USD"] || []} type="monotone" dataKey="indexed_close" name="BTC-USD" stroke="#fb923c" strokeWidth={2} dot={false} />
+              <Line data={indexedBySymbol["SI=F"] || []} type="monotone" dataKey="indexed_close" name="SI=F" stroke="#cbd5e1" strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
         </Panel>
+      </section>
 
-        <Panel
-          title="Commodity Prediction"
-          subtitle="Model endpoint /predict/{symbol}"
-          error={predictions.error}
-        >
-          <div className="prediction-grid">
+      <section className="stakeholder-prediction-section">
+        <Panel title="Commodity prediction signals" eyebrow="Rafah model endpoint">
+          <div className="prediction-row">
             {(predictions.data || []).map((row) => (
               <div className="prediction-card" key={row.symbol}>
                 <span>{row.symbol}</span>
-                <PredictionBadge prediction={row.prediction} />
+                <PredictionBadge value={row.prediction} />
                 <b>{row.confidence ? `${row.confidence}%` : row.error ? "unavailable" : "-"}</b>
               </div>
             ))}
           </div>
 
-          <div className="mini-table">
+          <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -387,13 +691,15 @@ export default function App() {
                 </tr>
               </thead>
               <tbody>
-                {commodityLatestGrouped.map((row, idx) => (
-                  <tr key={`${row.symbol}-${idx}`}>
+                {latestCommodityGrouped.map((row) => (
+                  <tr key={row.symbol}>
                     <td>{row.symbol}</td>
                     <td>{row.commodity}</td>
-                    <td>{row.close.toFixed(4)}</td>
-                    <td className={row.change_pct >= 0 ? "pos" : "neg"}>{row.change_pct.toFixed(4)}</td>
-                    <td><PredictionBadge prediction={row.label} /></td>
+                    <td>{formatNumber(row.close, 4)}</td>
+                    <td className={row.change_pct >= 0 ? "pos" : "neg"}>
+                      {formatNumber(row.change_pct, 4)}
+                    </td>
+                    <td><PredictionBadge value={row.label} /></td>
                   </tr>
                 ))}
               </tbody>
@@ -402,108 +708,8 @@ export default function App() {
         </Panel>
       </section>
 
-      <section className="dashboard-grid">
-        <Panel
-          title="Market Flow Correlation"
-          subtitle="X = News/Sentiment + Commodity · Y = Kurs EUR/USD change"
-          error={correlationRows.error}
-        >
-          <ResponsiveContainer width="100%" height={360}>
-            <BarChart
-              data={(correlationRows.data || []).filter((r) => r.feature !== "kurs_change_pct").slice(0, 10)}
-              layout="vertical"
-              margin={{ left: 120, right: 24 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis type="number" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
-              <YAxis dataKey="feature" type="category" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
-              <Bar dataKey="pearson_r" fill="#38bdf8" />
-            </BarChart>
-          </ResponsiveContainer>
-        </Panel>
-
-        <Panel
-          title="Model Feature Importance"
-          subtitle="RandomForestRegressor feature contribution"
-          error={featureImportanceRows.error}
-        >
-          <ResponsiveContainer width="100%" height={360}>
-            <BarChart
-              data={(featureImportanceRows.data || []).slice(0, 10)}
-              layout="vertical"
-              margin={{ left: 120, right: 24 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-              <XAxis type="number" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
-              <YAxis dataKey="feature" type="category" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
-              <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
-              <Bar dataKey="importance" fill="#f97316" />
-            </BarChart>
-          </ResponsiveContainer>
-        </Panel>
-      </section>
-
-      <section className="wide-panel">
-        <div className="panel-head">
-          <div>
-            <h3>Market Flow Modelling Summary</h3>
-            <p>Model output from rafah/modelling/market_flow_correlation.py</p>
-          </div>
-        </div>
-
-        <div className="model-summary-grid">
-          <div>
-            <span>Rows Joined</span>
-            <b>{modelReport.data?.rows_joined ?? "-"}</b>
-          </div>
-          <div>
-            <span>Model Type</span>
-            <b>{modelReport.data?.model_type ?? "-"}</b>
-          </div>
-          <div>
-            <span>Target</span>
-            <b>{modelReport.data?.target ?? "-"}</b>
-          </div>
-          <div>
-            <span>MAE</span>
-            <b>{modelReport.data?.mae !== undefined ? Number(modelReport.data.mae).toFixed(4) : "-"}</b>
-          </div>
-          <div>
-            <span>R²</span>
-            <b>{modelReport.data?.r2 !== undefined ? Number(modelReport.data.r2).toFixed(4) : "-"}</b>
-          </div>
-        </div>
-
-        <p className="model-note">
-          {modelReport.data?.note || "No modelling report loaded yet."}
-        </p>
-      </section>
-
-      <section className="wide-panel">
-        <div className="panel-head">
-          <div>
-            <h3>Integration Status & Alerting</h3>
-            <p>Dashboard reads API health. Telegram alerting is handled by backend Python utility, not by React, to keep bot tokens private.</p>
-          </div>
-          <Bell size={22} />
-        </div>
-
-        <div className="alert-row">
-          <div>
-            <Activity size={18} />
-            <span>API refresh interval: 30 seconds</span>
-          </div>
-          <div>
-            <Database size={18} />
-            <span>Commodity API: {import.meta.env.VITE_COMMODITY_API}</span>
-          </div>
-          <div>
-            <BarChart3 size={18} />
-            <span>Mode: {import.meta.env.VITE_USE_MOCK === "true" ? "Mock data" : "Backend API"}</span>
-          </div>
-        </div>
-      </section>
+        </>
+      )}
     </main>
   );
 }

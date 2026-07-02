@@ -28,3 +28,8 @@ modelling/*.pkl
 
 # Log files
 *.log
+rafah/dashboard-react/src/*.bak
+rafah/dashboard-react/src/*.before-*
+rafah/orchestration/logs/
+rafah/orchestration/state/
+rafah/orchestration/audit/
