@@ -7,13 +7,22 @@ Dipakai oleh:
   - spark_stream.py (notifikasi preprocessing & Gold layer)
 """
 
+import os
 import requests
 import threading
 from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ── Konfigurasi Bot ───────────────────────────────────────────
-BOT_TOKEN = "TELEGRAM_BOT_TOKEN"
-CHAT_ID   = "5974165452"
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+if not BOT_TOKEN or not CHAT_ID:
+    raise RuntimeError(
+        "TELEGRAM_BOT_TOKEN dan TELEGRAM_CHAT_ID harus di-set "
+        "di environment variable atau file .env"
+    )
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
 
 # Kirim max 1 notifikasi tiap N detik per kategori (anti spam)
