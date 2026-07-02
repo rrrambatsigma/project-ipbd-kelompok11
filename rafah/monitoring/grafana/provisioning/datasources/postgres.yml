@@ -1,0 +1,17 @@
+apiVersion: 1
+
+datasources:
+  - name: MarketFlow Postgres
+    uid: marketflow-postgres
+    type: postgres
+    access: proxy
+    url: host.docker.internal:5433
+    database: kurs_eur_db
+    user: kursadmin
+    secureJsonData:
+      password: kursadmin
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1500
+      timescaledb: false
+    editable: true
