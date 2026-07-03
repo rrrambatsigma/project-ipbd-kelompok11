@@ -1,26 +1,26 @@
 COMMODITY MODEL REPORT — Gold (GLD)
 ==================================================
-Accuracy : 32.23%
-CV 5-fold: 0.3876 ± 0.0454
+Accuracy : 33.70%
+CV 5-fold: 0.3921 ± 0.0381
 
               precision    recall  f1-score   support
 
-        naik       0.35      0.36      0.36       106
-      stabil       0.45      0.15      0.23        91
-       turun       0.27      0.47      0.34        76
+        naik       0.36      0.39      0.37       106
+      stabil       0.47      0.18      0.27        92
+       turun       0.27      0.45      0.34        75
 
-    accuracy                           0.32       273
-   macro avg       0.36      0.33      0.31       273
-weighted avg       0.36      0.32      0.31       273
+    accuracy                           0.34       273
+   macro avg       0.37      0.34      0.33       273
+weighted avg       0.38      0.34      0.33       273
 
 Top 10 Feature Importance:
-  positive_ratio                : 0.0657
-  negative_ratio                : 0.0643
-  momentum_5d                   : 0.0557
-  lag1_change_pct               : 0.0532
-  lag1_hl_range                 : 0.0506
-  close_vs_ma5                  : 0.0505
-  rolling5_avg_change           : 0.0502
-  close_vs_open                 : 0.0489
-  lag3_change_pct               : 0.0487
-  rolling3_avg_change           : 0.0484
+  negative_ratio                : 0.0639
+  positive_ratio                : 0.0583
+  momentum_5d                   : 0.0565
+  lag1_change_pct               : 0.0533
+  lag1_hl_range                 : 0.0526
+  close_vs_ma5                  : 0.0509
+  close_vs_ma10                 : 0.0502
+  lag3_change_pct               : 0.0499
+  close_vs_open                 : 0.0495
+  rolling3_avg_change           : 0.0490

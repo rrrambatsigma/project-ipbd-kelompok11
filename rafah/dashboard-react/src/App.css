@@ -1508,3 +1508,24 @@ th {
     left: 12px;
   }
 }
+
+/* Model Analysis layout cleanup */
+.analysis-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.analysis-grid > .panel:nth-child(3) {
+  grid-column: 1 / -1;
+  min-height: 500px;
+}
+
+.analysis-grid > .panel:nth-child(3) .recharts-responsive-container {
+  min-height: 390px;
+}
+
+@media (max-width: 1200px) {
+  .analysis-grid > .panel:nth-child(3) {
+    grid-column: auto;
+  }
+}

@@ -1,26 +1,26 @@
 COMMODITY MODEL REPORT — Bitcoin (BTC-USD)
 ==================================================
-Accuracy : 32.91%
-CV 5-fold: 0.3770 ± 0.0373
+Accuracy : 34.09%
+CV 5-fold: 0.3723 ± 0.0346
 
               precision    recall  f1-score   support
 
-        naik       0.35      0.37      0.36       144
-      stabil       0.24      0.27      0.25        96
-       turun       0.37      0.33      0.35       158
+        naik       0.36      0.37      0.36       145
+      stabil       0.26      0.31      0.28        97
+       turun       0.39      0.34      0.36       157
 
-    accuracy                           0.33       398
-   macro avg       0.32      0.32      0.32       398
-weighted avg       0.33      0.33      0.33       398
+    accuracy                           0.34       399
+   macro avg       0.34      0.34      0.34       399
+weighted avg       0.35      0.34      0.34       399
 
 Top 10 Feature Importance:
-  positive_ratio                : 0.0794
-  negative_ratio                : 0.0711
-  high_low_range                : 0.0513
-  close_vs_open                 : 0.0512
-  volatility                    : 0.0498
-  rolling3_avg_change           : 0.0484
-  rolling5_volatility           : 0.0482
-  price_change_pct              : 0.0480
-  close_vs_ma5                  : 0.0479
-  rolling3_volatility           : 0.0475
+  positive_ratio                : 0.0813
+  negative_ratio                : 0.0717
+  close_vs_open                 : 0.0524
+  volatility                    : 0.0516
+  high_low_range                : 0.0498
+  rolling3_avg_change           : 0.0491
+  momentum_5d                   : 0.0481
+  rolling5_volatility           : 0.0480
+  lag3_change_pct               : 0.0468
+  close_vs_ma5                  : 0.0468

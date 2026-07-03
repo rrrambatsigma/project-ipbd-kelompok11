@@ -1,0 +1,21 @@
+==========================================================================================
+TOP LAG CORRELATION
+==========================================================================================
+           feature  lag_days  pearson_r    abs_r  n
+    change_pct_GLD         1   0.564252 0.564252 29
+    change_pct_SIF         4  -0.509699 0.509699 26
+    volatility_SIF         7  -0.508895 0.508895 23
+    change_pct_SIF         0   0.505897 0.505897 30
+change_pct_BTC_USD         1   0.468266 0.468266 29
+    change_pct_SIF         1   0.447431 0.447431 29
+      avg_neg_prob         3  -0.446182 0.446182 27
+    volatility_GLD         5  -0.431752 0.431752 25
+    volatility_SIF         3   0.426814 0.426814 27
+      avg_neg_prob         7   0.415931 0.415931 23
+volatility_BTC_USD         6   0.373129 0.373129 24
+    change_pct_GLD         3  -0.365140 0.365140 27
+
+[OK] Saved:
+rafah/modelling/market_flow_outputs/lag_correlation_analysis.csv
+rafah/modelling/market_flow_outputs/lag_correlation_top.csv
+rafah/modelling/market_flow_outputs/lag_correlation_top.png

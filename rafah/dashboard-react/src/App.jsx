@@ -99,6 +99,16 @@ async function fetchJoinedDataset() {
   }
 }
 
+async function fetchLagCorrelation() {
+  try {
+    const res = await fetch(`/market_flow_outputs/lag_correlation_top.csv?t=${Date.now()}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return { ok: true, data: parseCsv(await res.text()), error: null };
+  } catch (err) {
+    return { ok: false, data: [], error: err.message };
+  }
+}
+
 function normalizeKurs(rows) {
   return sortByDate((Array.isArray(rows) ? rows : []).map((r) => ({
     date: dateOf(r),
@@ -137,7 +147,7 @@ function normalizeCommodity(rows) {
     commodity: r.commodity,
     close: asNumber(r.close ?? r.close_price ?? r.price),
     change_pct: asNumber(r.change_pct ?? r.price_change_pct),
-    label: r.label ?? "-",
+    label: r.label ?? r.commodity_label ?? r.direction_label ?? r.prediction ?? r.pred_class ?? "-",
     tick_count: asNumber(r.tick_count),
   })));
 }
@@ -274,6 +284,7 @@ export default function App() {
   const [correlationRows, setCorrelationRows] = useState({ ok: true, data: [], error: null });
   const [featureImportanceRows, setFeatureImportanceRows] = useState({ ok: true, data: [], error: null });
   const [joinedRows, setJoinedRows] = useState({ ok: true, data: [], error: null });
+  const [lagCorrelationRows, setLagCorrelationRows] = useState({ ok: true, data: [], error: null });
 
   async function load() {
     setLoading(true);
@@ -289,6 +300,7 @@ export default function App() {
       correlationRes,
       featureImportanceRes,
       joinedRes,
+      lagRes,
     ] = await Promise.all([
       checkApiStatus(),
       fetchKursDaily(),
@@ -300,6 +312,7 @@ export default function App() {
       fetchMarketFlowCorrelation(),
       fetchMarketFlowFeatureImportance(),
       fetchJoinedDataset(),
+      fetchLagCorrelation(),
     ]);
 
     setApiStatus(statusRes);
@@ -312,6 +325,7 @@ export default function App() {
     setCorrelationRows(correlationRes);
     setFeatureImportanceRows(featureImportanceRes);
     setJoinedRows(joinedRes);
+    setLagCorrelationRows(lagRes);
     setLastRefresh(new Date());
     setLoading(false);
   }
@@ -385,6 +399,17 @@ export default function App() {
     return (featureImportanceRows.data || []).slice(0, 8);
   }, [featureImportanceRows]);
 
+  const lagTop = useMemo(() => {
+    return (lagCorrelationRows.data || [])
+      .filter((r) => Number.isFinite(Number(r.pearson_r)))
+      .slice(0, 10)
+      .map((r) => ({
+        ...r,
+        label: `${r.feature} | lag ${r.lag_days}`,
+        pearson_r: Number(r.pearson_r),
+      }));
+  }, [lagCorrelationRows]);
+
   const scatterRows = useMemo(() => {
     if (!topDriver) return [];
 
@@ -428,14 +453,29 @@ export default function App() {
   }, [commodityBySymbol]);
 
   const latestCommodityGrouped = useMemo(() => {
-    const source = latestCommodityRows.length ? latestCommodityRows : commodityRows;
+    const wanted = ["BTC-USD", "GLD", "SI=F"];
     const map = new Map();
 
-    for (const row of [...source].reverse()) {
-      if (row.symbol && !map.has(row.symbol)) map.set(row.symbol, row);
+    // Daily data usually has complete symbols and labels.
+    for (const row of [...commodityRows].reverse()) {
+      if (row.symbol && wanted.includes(row.symbol) && !map.has(row.symbol)) {
+        map.set(row.symbol, row);
+      }
     }
 
-    return Array.from(map.values());
+    // Latest data has priority for fresh close/change values, but keep daily label fallback.
+    for (const row of [...latestCommodityRows].reverse()) {
+      if (!row.symbol || !wanted.includes(row.symbol)) continue;
+
+      const existing = map.get(row.symbol) || {};
+      map.set(row.symbol, {
+        ...existing,
+        ...row,
+        label: row.label && row.label !== "-" ? row.label : existing.label,
+      });
+    }
+
+    return wanted.map((symbol) => map.get(symbol)).filter(Boolean);
   }, [latestCommodityRows, commodityRows]);
 
   const modelR2 = modelReport.data?.r2;
@@ -600,6 +640,19 @@ export default function App() {
               <YAxis dataKey="feature" type="category" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
               <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
               <Bar dataKey="importance" fill="#f97316" radius={[0, 8, 8, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+
+        <Panel title="Lag relationship to EUR/USD" eyebrow="Time series lag" error={lagCorrelationRows.error}>
+          <ResponsiveContainer width="100%" height={380}>
+            <BarChart data={lagTop} layout="vertical" margin={{ left: 150, right: 24 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+              <XAxis type="number" tick={{ fill: "#cbd5e1", fontSize: 11 }} />
+              <YAxis dataKey="label" type="category" tick={{ fill: "#cbd5e1", fontSize: 11 }} width={145} />
+              <ReferenceLine x={0} stroke="#64748b" />
+              <Tooltip contentStyle={{ background: "#020617", border: "1px solid #334155" }} />
+              <Bar dataKey="pearson_r" fill="#a78bfa" radius={[0, 8, 8, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Panel>

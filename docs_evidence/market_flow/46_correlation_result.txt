@@ -1,0 +1,16 @@
+==========================================================================================
+TOP CORRELATION VS kurs_change_pct
+==========================================================================================
+           feature  pearson_r    abs_r
+    change_pct_SIF   0.505897 0.505897
+      avg_pos_prob   0.267359 0.267359
+change_pct_BTC_USD   0.178169 0.178169
+    negative_count  -0.136269 0.136269
+    volatility_GLD   0.131815 0.131815
+    volatility_SIF   0.111152 0.111152
+    positive_count   0.083796 0.083796
+    change_pct_GLD   0.067874 0.067874
+     close_BTC_USD   0.065951 0.065951
+      avg_neg_prob   0.049167 0.049167
+volatility_BTC_USD   0.036452 0.036452
+         close_SIF   0.035823 0.035823
