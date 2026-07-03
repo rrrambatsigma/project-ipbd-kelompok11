@@ -1,0 +1,84 @@
+services:
+  spark:
+    build:
+      context: ./spark
+      dockerfile: Dockerfile
+    container_name: preprocessing-spark
+    restart: unless-stopped
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      MINIO_BUCKET_RAW: news-raw
+      MINIO_BUCKET_PROCESSED: news-processed
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+      PREFECT_API_URL: http://prefect-server:4200/api
+      TZ: Asia/Jakarta
+      SPARK_DRIVER_MEMORY: 1g
+      SPARK_EXECUTOR_MEMORY: 1g
+    volumes:
+      - ./spark/jobs:/app/jobs
+      - spark-logs:/app/logs
+    networks:
+      - ingestion-net
+    entrypoint: ["/app/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'prefect worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  modelling:
+    build:
+      context: ../modelling
+      dockerfile: Dockerfile
+    container_name: preprocessing-modelling
+    restart: unless-stopped
+    environment:
+      MINIO_ENDPOINT: ${MINIO_ENDPOINT}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+      TELEGRAM_BOT_TOKEN_MODELLING: ${TELEGRAM_BOT_TOKEN_MODELLING:-8883638359:AAFlmg19cd5oOdhFPDQbXSNZrW8r7nHgcPk}
+      TELEGRAM_CHAT_ID_MODELLING: ${TELEGRAM_CHAT_ID_MODELLING:--1004360195236}
+      PREFECT_API_URL: http://prefect-server:4200/api
+      TZ: Asia/Jakarta
+    env_file:
+      - .env
+    volumes:
+      - ../modelling:/app/modelling
+      - modelling-logs:/app/logs
+    networks:
+      - ingestion-net
+    entrypoint: ["/app/modelling/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'prefect worker' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  serving:
+    build:
+      context: ../serving
+      dockerfile: Dockerfile
+    container_name: serving-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    networks:
+      - ingestion-net
+
+volumes:
+  spark-logs:
+  modelling-logs:
+
+networks:
+  ingestion-net:
+    external: true
+    name: ingestion_ingestion-net

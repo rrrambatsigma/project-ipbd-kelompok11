@@ -33,3 +33,41 @@ rafah/dashboard-react/src/*.before-*
 rafah/orchestration/logs/
 rafah/orchestration/state/
 rafah/orchestration/audit/
+# ─────────────────────────────────────────
+# Environment variables — JANGAN pernah commit
+# ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# ─────────────────────────────────────────
+# Model binaries — terlalu besar untuk Git
+# ─────────────────────────────────────────
+**/models/*.ftz
+**/models/*.bin
+**/models/*.pt
+**/models/*.pkl
+
+# ─────────────────────────────────────────
+# Logs & cache
+# ─────────────────────────────────────────
+logs/
+*.log
+.prefect/
+
+# ─────────────────────────────────────────
+# OS / Editor
+# ─────────────────────────────────────────
+.DS_Store
+.vscode/
+*.swp
