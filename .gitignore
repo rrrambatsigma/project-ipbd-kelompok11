@@ -1,0 +1,73 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Model binary (besar, bisa di-generate ulang)
+modelling/*.pkl
+
+# Checkpoint Spark
+/tmp/checkpoint/
+
+# macOS
+.DS_Store
+
+# Environment variables / secrets
+.env
+*.env
+
+# Ivy cache (JAR Spark)
+.ivy2/
+
+# Log files
+*.log
+rafah/dashboard-react/src/*.bak
+rafah/dashboard-react/src/*.before-*
+rafah/orchestration/logs/
+rafah/orchestration/state/
+rafah/orchestration/audit/
+# ─────────────────────────────────────────
+# Environment variables — JANGAN pernah commit
+# ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# ─────────────────────────────────────────
+# Model binaries — terlalu besar untuk Git
+# ─────────────────────────────────────────
+**/models/*.ftz
+**/models/*.bin
+**/models/*.pt
+**/models/*.pkl
+
+# ─────────────────────────────────────────
+# Logs & cache
+# ─────────────────────────────────────────
+logs/
+*.log
+.prefect/
+
+# ─────────────────────────────────────────
+# OS / Editor
+# ─────────────────────────────────────────
+.DS_Store
+.vscode/
+*.swp

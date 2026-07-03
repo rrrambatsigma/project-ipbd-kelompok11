@@ -1,0 +1,20 @@
+==========================================================================================
+MARKET FLOW MODEL EVALUATION
+==========================================================================================
+Model type : RandomForestRegressor
+Target     : kurs_change_pct
+Rows joined: 30
+MAE        : 0.18282963591269857
+R2         : -0.10978277061825548
+
+Top feature importance:
+- change_pct_SIF: 0.1900
+- close_BTC_USD: 0.1827
+- volatility_GLD: 0.1700
+- change_pct_BTC_USD: 0.0978
+- close_GLD: 0.0617
+- avg_pos_prob: 0.0504
+- volatility_BTC_USD: 0.0493
+- change_pct_GLD: 0.0458
+- avg_neg_prob: 0.0409
+- close_SIF: 0.0406

@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: "Market Flow Monitoring"
+    orgId: 1
+    folder: "IPBD Kelompok 11"
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

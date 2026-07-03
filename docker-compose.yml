@@ -1,0 +1,87 @@
+version: '3'
+services:
+
+  # ── Zookeeper (dependency Kafka) ──────────────────────────────────────────
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - 22181:2181
+
+  # ── Kafka Broker ──────────────────────────────────────────────────────────
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - 29092:29092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # ── PostgreSQL (Serving Database) ─────────────────────────────────────────
+  postgres:
+    image: postgres:15
+    container_name: postgres_kurs_eur
+    ports:
+      - "5433:5432"   # port 5433 di host agar tidak bentrok dengan postgres lain
+    environment:
+      POSTGRES_USER: kursadmin
+      POSTGRES_PASSWORD: kursadmin
+      POSTGRES_DB: kurs_eur_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  # ── MinIO (Data Lake — opsional, untuk Bronze layer) ─────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: minio_kurs_eur
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+        sleep 5;
+        mc alias set local http://minio:9000 minioadmin minioadmin;
+        mc mb --ignore-existing local/kurs-eur;
+        echo '[OK] Bucket kurs-eur siap.';
+      "
+
+  # ── Grafana (Dashboard Monitoring) ────────────────────────────────────
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana_kurs_eur
+    ports:
+      - "3001:3000"   # port 3001 di host agar tidak bentrok dengan Grafana lain
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  minio_data:
+  grafana_data:

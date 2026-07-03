@@ -1,0 +1,41 @@
+BASELINE MODEL REPORT — IPBD Kelompok 11 (JOJO)
+=================================================================
+Model        : XGBoost Classifier
+Sumber       : kurs_daily + sentiment_daily
+Symbol       : EURUSD=X
+Granularity  : Harian
+Threshold    : ±0.3%
+Total data   : 1411 hari
+Train / Test : 1128 / 283
+Accuracy     : 56.89%
+CV (5-fold)  : 0.5574 ± 0.0793
+CV scores    : [0.4426, 0.5489, 0.6809, 0.5191, 0.5957]
+=================================================================
+
+CLASSIFICATION REPORT:
+              precision    recall  f1-score   support
+
+     melemah       0.31      0.32      0.31        59
+     menguat       0.31      0.20      0.24        59
+      stabil       0.71      0.79      0.75       165
+
+    accuracy                           0.57       283
+   macro avg       0.44      0.44      0.44       283
+weighted avg       0.54      0.57      0.55       283
+
+
+FITUR TERPILIH (24 total):
+  Kurs Jojo (15): price_change_pct, volatility, high_low_range, close_vs_open, close_vs_ma5, close_vs_ma10, ma5_vs_ma10, lag1_change_pct, lag2_change_pct, lag3_change_pct, lag1_volatility, rolling3_avg_change, rolling5_avg_change, rolling3_volatility, momentum_5d
+  Rambat Sentimen (9): avg_sentiment, sentiment_volatility, sentiment_lag1, sentiment_lag2, has_ecb, has_interest_rate, has_monetary_policy, positive_ratio, negative_ratio
+
+TOP 10 FEATURE IMPORTANCE:
+  high_low_range                : 0.1500
+  volatility                    : 0.0777
+  close_vs_open                 : 0.0488
+  lag3_change_pct               : 0.0484
+  sentiment_lag2                : 0.0467
+  negative_ratio                : 0.0454
+  sentiment_lag1                : 0.0444
+  lag1_change_pct               : 0.0440
+  close_vs_ma10                 : 0.0434
+  rolling3_volatility           : 0.0431

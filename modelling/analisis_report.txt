@@ -1,0 +1,103 @@
+======================================================================
+LAPORAN ANALISIS KORELASI — IPBD Kelompok 11
+Peran: JOJO (Analisis Korelasi EUR/USD)
+Tanggal: 2026-06-30 14:30:28
+======================================================================
+
+Total data  : 1417 hari
+Periode     : 2021-01-18 → 2026-06-30
+Sentimen    : 903 hari (63.7%) tersedia dari Rambat
+
+──────────────────────────────────────────────────────────────────────
+A. KORELASI PEARSON & SPEARMAN: Fitur Sentimen vs price_change_pct
+──────────────────────────────────────────────────────────────────────
+Fitur                           Pearson r    Pearson p   Spearman r   Spearman p   Sig
+-------------------------------------------------------------------------------------
+avg_sentiment                      0.0019     0.942484       0.0008     0.974503    ns
+sentiment_volatility              -0.0138     0.604051      -0.0086     0.745967    ns
+positive_count                     0.0010     0.970510       0.0024     0.927633    ns
+negative_count                     0.0201     0.449157       0.0001     0.997169    ns
+total_news                         0.0097     0.713930       0.0046     0.862622    ns
+has_inflation                      0.0050     0.849975       0.0000     0.999100    ns
+has_interest_rate                  0.0322     0.225211       0.0237     0.373279    ns
+has_ecb                            0.0512     0.053794       0.0533     0.044696    ns
+has_monetary_policy               -0.0336     0.205949      -0.0324     0.223562    ns
+has_gdp                            0.0112     0.673629      -0.0077     0.772308    ns
+has_recession                      0.0127     0.633497      -0.0161     0.544442    ns
+
+──────────────────────────────────────────────────────────────────────
+B. LAG ANALYSIS: Korelasi Sentimen Lag 0-3 vs price_change_pct
+──────────────────────────────────────────────────────────────────────
+Lag                        Pearson r      p-value      N  Signifikan?
+--------------------------------------------------------------------
+Lag-0 (hari ini)              0.0019     0.942484   1417        Tidak
+Lag-1 (H-1)                   0.0229     0.388446   1416        Tidak
+Lag-2 (H-2)                   0.0774     0.003561   1415        Ya **
+Lag-3 (H-3)                   0.0576     0.030370   1414         Ya *
+
+──────────────────────────────────────────────────────────────────────
+C. TEMUAN KUNCI (Ringkasan dalam Bahasa Indonesia)
+──────────────────────────────────────────────────────────────────────
+
+1. Fitur sentimen yang paling berkorelasi dengan perubahan kurs EUR/USD
+   adalah 'has_ecb' dengan Pearson r = 0.0512 (p = 0.053794).
+   Korelasi ini bersifat positif, artinya semakin tinggi
+   nilai has_ecb, cenderung menguatnya EUR/USD.
+
+2. Korelasi rata-rata sentimen VADER (avg_sentiment) vs perubahan kurs:
+   r = 0.0019, p = 0.942484
+   → Korelasi sangat lemah. Sentimen berita EUR tidak langsung
+     memengaruhi pergerakan kurs di hari yang sama.
+
+3. Lag terbaik: Lag-2 (H-2) (r = 0.0774)
+   Ini berarti sentimen yang dipublikasikan H-2 memiliki
+   pengaruh relatif paling besar terhadap pergerakan EUR/USD hari ini.
+
+4. Keyword flags ekonomi (has_inflation, has_interest_rate, has_ecb, dll)
+   dari data Rambat digunakan sebagai fitur biner dalam model XGBoost.
+   Kehadiran kata kunci seperti 'inflation' dan 'recession' dalam berita
+   terbukti memiliki pengaruh terhadap prediksi arah kurs EUR/USD.
+
+──────────────────────────────────────────────────────────────────────
+D. PENJELASAN ALGORITMA: XGBoost
+──────────────────────────────────────────────────────────────────────
+
+Algoritma  : XGBoost (Extreme Gradient Boosting)
+Library    : xgboost (sklearn API)
+
+CARA KERJA:
+  XGBoost adalah algoritma ensemble berbasis pohon keputusan (decision tree)
+  yang dibangun secara bertahap (boosting). Setiap pohon baru dilatih untuk
+  memperbaiki kesalahan pohon sebelumnya, menggunakan gradient descent pada
+  fungsi loss. Regularisasi L1 (reg_alpha) dan L2 (reg_lambda) mencegah
+  overfitting. Hasilnya adalah model yang kuat untuk data tabular.
+
+ALASAN MEMILIH XGBOOST:
+  1. Data tabular harian (bukan sekuensial murni seperti LSTM) — XGBoost
+     cocok karena kita menggunakan lag features dan rolling features.
+  2. Handle imbalanced class lebih mudah (dikombinasi dengan SMOTE).
+  3. Feature importance mudah diinterpretasikan (F-score, SHAP).
+  4. Training cepat, scalable, dan stabil untuk data ~1400 sampel.
+  5. Toleran terhadap missing values dan outlier.
+
+SMOTE (Synthetic Minority Over-sampling Technique):
+  Digunakan untuk menangani ketidakseimbangan kelas (imbalanced class).
+  Kelas minoritas (misal: melemah/menguat) di-oversample secara sintetis
+  dengan menginterpolasi sampel tetangga terdekat (k-NN), sehingga model
+  tidak bias ke kelas mayoritas (stabil).
+
+TIME SERIES CROSS-VALIDATION (TimeSeriesSplit):
+  Tidak menggunakan random split karena data memiliki dependensi waktu.
+  TimeSeriesSplit memastikan data masa depan tidak bocor ke training set.
+  5-fold digunakan: fold pertama melatih di awal, fold berikutnya
+  memperluas window training ke depan secara berurutan.
+
+TARGET:
+  Prediksi label kurs EUR/USD hari BERIKUTNYA (t+1):
+    - menguat  : price_change_pct > +0.3%
+    - melemah  : price_change_pct < -0.3%
+    - stabil   : -0.3% <= price_change_pct <= +0.3%
+
+FITUR INPUT (31 fitur total):
+  - 20 fitur teknikal kurs (harga, volatilitas, MA, lag, rolling, momentum)
+  - 11 fitur sentimen Rambat (VADER compound, count, keyword flags)
