@@ -39,6 +39,7 @@ from scrapers.newsapi_scraper import scrape_newsapi
 from storage.minio_client import MinIOClient
 from utils.telegram_alert import alert_batch_success, alert_batch_failed
 from utils.metrics import push_metrics
+from failure_notifier import prefect_failure_hook, send_failure_alert
 
 
 # ═══════════════════════════════════════════
@@ -235,6 +236,7 @@ def task_generate_summary(
         "Jadwal mengikuti sesi pasar Eropa (Senin–Jumat). "
         "Output: raw JSON ke MinIO bucket news-raw."
     ),
+    on_failure=[prefect_failure_hook],
 )
 def euro_news_batch_flow(
     session:        str  = "manual",
@@ -291,6 +293,11 @@ def euro_news_batch_flow(
             alert_batch_success(summary)
         else:
             alert_batch_failed(session, f"PARTIAL — {summary['total_failed']} artikel gagal")
+            send_failure_alert(
+                flow_name="euro_news_batch",
+                error_message=f"PARTIAL — {summary['total_failed']} artikel gagal di sesi {session}",
+                task_name=f"{session}/upload"
+            )
     except Exception as e:
         logger.warning(f"Alert Telegram gagal (non-fatal): {e}")
 

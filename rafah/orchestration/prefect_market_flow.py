@@ -13,6 +13,8 @@ import requests
 from dotenv import load_dotenv
 from prefect import flow, task, get_run_logger
 
+from failure_notifier import prefect_failure_hook, send_failure_alert
+
 
 ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT / ".env", override=True)
@@ -332,7 +334,7 @@ def send_success_and_event_alerts(dq_report):
     }
 
 
-@flow(name="Market Flow Modelling Pipeline")
+@flow(name="Market Flow Modelling Pipeline", on_failure=[prefect_failure_hook])
 def market_flow_pipeline():
     run_id = str(uuid.uuid4())
 
@@ -368,10 +370,10 @@ def market_flow_pipeline():
             "error": error_text,
         })
 
-        send_telegram(
-            "❌ <b>Market Flow Pipeline Failed</b>\n\n"
-            f"Run ID: <code>{run_id}</code>\n"
-            f"Error: <code>{error_text[:900]}</code>"
+        send_failure_alert(
+            flow_name="Market Flow Modelling Pipeline",
+            error_message=error_text,
+            run_id=run_id,
         )
 
         raise
