@@ -259,27 +259,28 @@ def collect_metrics():
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == "/health":
-            body = b"ok\n"
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
+    def _write_response(self, status, body, content_type="text/plain"):
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Client closed the scrape connection early. This is harmless for monitoring.
+            return
+
+    def do_GET(self):
+        if self.path == "/health":
+            self._write_response(200, b"ok\\n")
             return
 
         if self.path.startswith("/metrics"):
             body = collect_metrics().encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; version=0.0.4")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+            self._write_response(200, body, "text/plain; version=0.0.4")
             return
 
-        self.send_response(404)
-        self.end_headers()
+        self._write_response(404, b"not found\\n")
 
     def log_message(self, fmt, *args):
         return
