@@ -71,3 +71,4 @@ logs/
 .DS_Store
 .vscode/
 *.swp
+docs_evidence/
