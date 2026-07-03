@@ -1,0 +1,10 @@
+{
+  "created_at": "2026-07-03T10:00:03.777785",
+  "date": "2026-07-03",
+  "predicted_direction": "weakening",
+  "predicted_change_pct": -0.13587438333333346,
+  "actual_change_pct": 0.0,
+  "confidence": 67.0,
+  "main_driver": "change_pct_SIF",
+  "main_driver_correlation": 0.5058969682093536
+}

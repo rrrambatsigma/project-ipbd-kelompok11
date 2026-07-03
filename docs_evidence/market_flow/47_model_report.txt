@@ -1,0 +1,60 @@
+{
+    "created_at": "2026-07-03T07:18:41.415429",
+    "rows_joined": 30,
+    "features": [
+        "positive_count",
+        "negative_count",
+        "net_sentiment",
+        "avg_pos_prob",
+        "avg_neg_prob",
+        "total_news",
+        "change_pct_BTC_USD",
+        "change_pct_GLD",
+        "change_pct_SIF",
+        "close_BTC_USD",
+        "close_GLD",
+        "close_SIF",
+        "volatility_BTC_USD",
+        "volatility_GLD",
+        "volatility_SIF"
+    ],
+    "target": "kurs_change_pct",
+    "top_correlation": {
+        "kurs_change_pct": 1.0,
+        "change_pct_SIF": 0.5058969682093536,
+        "avg_pos_prob": 0.2673586235296133,
+        "change_pct_BTC_USD": 0.17816947084524704,
+        "negative_count": -0.13626945711311603,
+        "volatility_GLD": 0.13181455597280595,
+        "volatility_SIF": 0.11115205784717243,
+        "positive_count": 0.08379565628552717,
+        "change_pct_GLD": 0.06787446350403123,
+        "close_BTC_USD": 0.06595101288981133
+    },
+    "model_type": "RandomForestRegressor",
+    "test_rows": 8,
+    "r2": -0.10978277061825548,
+    "mae": 0.18282963591269857,
+    "direction_accuracy": 0.25,
+    "latest_prediction": {
+        "date": "2026-07-03",
+        "actual_change_pct": 0.0,
+        "predicted_change_pct": -0.13587438333333346,
+        "actual_direction": "stable",
+        "predicted_direction": "weakening",
+        "direction_correct": false,
+        "confidence": 67.0
+    },
+    "top_feature_importance": {
+        "change_pct_SIF": 0.19003315591573175,
+        "close_BTC_USD": 0.1826783006490136,
+        "volatility_GLD": 0.16998648738302202,
+        "change_pct_BTC_USD": 0.09778273466482809,
+        "close_GLD": 0.06174050759032222,
+        "avg_pos_prob": 0.05039589934730998,
+        "volatility_BTC_USD": 0.04930532275305558,
+        "change_pct_GLD": 0.04583108026683863,
+        "avg_neg_prob": 0.0409358135291935,
+        "close_SIF": 0.04059105044995119
+    }
+}
